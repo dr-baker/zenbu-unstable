@@ -1,6 +1,5 @@
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
 
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent"
 
@@ -16,50 +15,59 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent"
  *   3. Which docs explain how to author plugins, services, schema,
  *      events, views, etc.
  *
- * We resolve the Zenbu root once (env override → marker-file walk)
- * and hand the agent a stable, absolute path so it can read AGENTS.md
- * and the `context/` docs no matter which project directory the
- * active session is scoped to.
+ * We resolve the Zenbu root from the host app config path populated by
+ * Zenbu.js setup-gate. That path identifies the running app, not the
+ * user's active project/session directory.
  */
 
-const ROOT_MARKERS = ["zenbu.config.ts", "AGENTS.md"] as const
+type PackageJson = { name?: string }
 
-function hasZenbuMarkers(dir: string): boolean {
-  return ROOT_MARKERS.every(marker => existsSync(join(dir, marker)))
-}
-
-function walkUpForRoot(start: string): string | null {
-  let current = resolve(start)
-  // Walk up to the filesystem root looking for the Zenbu source markers.
-  for (;;) {
-    if (hasZenbuMarkers(current)) return current
-    const parent = dirname(current)
-    if (parent === current) return null
-    current = parent
-  }
-}
-
-/**
- * Resolve the absolute path of the Zenbu source checkout.
- *
- * Order of precedence:
- *   1. `ZENBU_SOURCE_DIR` env var (explicit override).
- *   2. Walk up from this compiled module's directory.
- *   3. Walk up from the session cwd as a last resort.
- */
-function resolveZenbuRoot(cwd: string): string | null {
-  const fromEnv = process.env.ZENBU_SOURCE_DIR?.trim()
-  if (fromEnv && hasZenbuMarkers(fromEnv)) return resolve(fromEnv)
-
+function isZenbuIdeRoot(dir: string): boolean {
+  if (!existsSync(join(dir, "zenbu.config.ts"))) return false
   try {
-    const here = dirname(fileURLToPath(import.meta.url))
-    const fromModule = walkUpForRoot(here)
-    if (fromModule) return fromModule
+    const pkg = JSON.parse(
+      readFileSync(join(dir, "package.json"), "utf8"),
+    ) as PackageJson
+    return pkg.name === "zenbu"
   } catch {
-    // import.meta.url not a file URL (unusual bundling) — fall through.
+    return false
   }
+}
 
-  return walkUpForRoot(cwd)
+/** Resolve the absolute path of the running Zenbu IDE app checkout. */
+function resolveZenbuRoot(): string | null {
+  const configPath = process.env.ZENBU_CONFIG_PATH?.trim()
+  if (!configPath) return null
+
+  const root = dirname(resolve(configPath))
+  return isZenbuIdeRoot(root) ? root : null
+}
+
+function hasFrameworkDocs(root: string): boolean {
+  return existsSync(join(root, "context/zenbujs"))
+}
+
+function docsLines(root: string): string[] {
+  const docs = [
+    {
+      path: "AGENTS.md",
+      text: "start here: house rules + plugin authoring guide",
+    },
+    { path: "context/rules/AGENTS.md", text: "house rules in detail" },
+    {
+      path: "context/zenbujs",
+      text: "framework reference, one file per topic",
+    },
+  ].filter(doc => existsSync(join(root, doc.path)))
+
+  if (docs.length === 0) return []
+
+  return [
+    "Before doing any app work, read the available house rules and framework docs:",
+    "",
+    ...docs.map(doc => `- \`$ZENBU/${doc.path}\` — ${doc.text}.`),
+    "",
+  ]
 }
 
 function houseRulesPrompt(root: string): string {
@@ -75,14 +83,7 @@ function houseRulesPrompt(root: string): string {
     "",
     `    ${root}`,
     "",
-    "Before doing any app work, read the house rules and framework docs:",
-    "",
-    `- \`$ZENBU/AGENTS.md\` — start here: house rules + plugin authoring guide.`,
-    `- \`$ZENBU/context/rules/AGENTS.md\` — house rules in detail.`,
-    `- \`$ZENBU/context/zenbujs/\` — framework reference, one file per topic`,
-    "  (services, rpc, events, database/migrations, plugins, injections,",
-    "  advice, views, production).",
-    "",
+    ...docsLines(root),
     "Monorepo layout:",
     "",
     `- \`$ZENBU/plugins/*\` — actual Zenbu plugins. Each has a`,
@@ -91,7 +92,7 @@ function houseRulesPrompt(root: string): string {
     `- \`$ZENBU/packages/*\` — plain npm-style libraries plugins consume`,
     "  (`@zenbu/ui`, `@zenbu/view-theme`). Shared libs go here.",
     "",
-    "Key rules to follow (full detail in AGENTS.md):",
+    "Key rules to follow:",
     "",
     "- A plugin extends the app three ways: fill a slot (injection with a",
     "  matching `meta.kind`), emit/subscribe to `events.app.*`, or wrap an",
@@ -104,15 +105,22 @@ function houseRulesPrompt(root: string): string {
     "- `react`, `react-dom`, `@zenbujs/core`, and `@zenbu/ui` are provided",
     "  by the runtime; do not bundle them.",
     "",
-    "When unsure how a host capability works, read the matching doc under",
-    "`$ZENBU/context/zenbujs/` and the closest existing plugin in",
-    "`$ZENBU/plugins/` before writing code.",
+    ...(hasFrameworkDocs(root)
+      ? [
+          "When unsure how a host capability works, read the matching doc under",
+          "`$ZENBU/context/zenbujs/` and the closest existing plugin in",
+          "`$ZENBU/plugins/` before writing code.",
+        ]
+      : [
+          "When unsure how a host capability works, read the closest existing",
+          "plugin in `$ZENBU/plugins/` before writing code.",
+        ]),
   ].join("\n")
 }
 
-export function createZenbuHouseRulesExtension(cwd: string): ExtensionFactory {
+export function createZenbuHouseRulesExtension(_cwd: string): ExtensionFactory {
   return pi => {
-    const root = resolveZenbuRoot(cwd)
+    const root = resolveZenbuRoot()
     if (!root) return
 
     pi.on("before_agent_start", event => ({
