@@ -10,7 +10,6 @@ import type { ImageContent } from "@earendil-works/pi-ai"
 import type { EventBus, SlashCommandInfo } from "@earendil-works/pi-coding-agent"
 
 import { AuthService } from "./auth"
-import { SummariesService } from "./summaries"
 import { ReposService } from "./repos"
 import { SessionActivityService } from "./session-activity"
 import { ShellEnvService } from "./shell-env"
@@ -82,7 +81,6 @@ export class SessionsService extends Service.create({
   key: "sessions",
   deps: {
     db: DbService,
-    summaries: SummariesService,
     rpc: RpcService,
     repos: ReposService,
     sessionActivity: SessionActivityService,

@@ -1,6 +1,5 @@
 import { useDb, useDbClient } from "@zenbujs/core/react"
 import { ChatTreeRow } from "./chat-tree-row"
-import { useSummary } from "@/hooks/use-summary"
 import { resolveChatLabel } from "@/lib/chat-label"
 import { useWindowId } from "@/lib/window-state/window-id"
 import { useActiveChatId } from "@/lib/window-state/active-view"
@@ -38,8 +37,7 @@ export function ChatSidebarItem({ chat, canArchive }: ChatSidebarItemProps) {
   const session = useDb(root =>
     sessionId ? root.app.sessions[sessionId] : undefined,
   )
-  const summary = useSummary(sessionId)
-  const { label } = resolveChatLabel(chat, session, summary)
+  const { label } = resolveChatLabel(chat, session)
 
   // True when the active pane's chat is this chat — or shares a
   // session with it (⌘/ split-same-session keeps one row lit).

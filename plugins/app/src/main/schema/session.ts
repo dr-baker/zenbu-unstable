@@ -77,6 +77,9 @@ export const session = z.object({
   piSessionId: z.string(),
   createdAt: z.number(),
   lastActivityAt: z.number(),
+  /** Unix ms the user most recently sent a prompt. Used to tell
+   * whether a just-created chat has ever carried a real message. */
+  lastMessageSentTime: z.number().nullable().default(null),
 
   model: providerModel.nullable(),
   thinkingLevel: thinkingLevel,
@@ -108,29 +111,6 @@ export const session = z.object({
   archived: z.boolean().default(false),
 
   eventLog: collection(eventItem, { debugName: "events" }),
-});
-
-/**
- * Per-session metadata cache, keyed by `sessionId`. Anything we
- * want indexable from the sidebar / tab strip without paying for
- * the lazy `eventLog` collection lives here.
- *
- * - `summary`: AI-generated title produced on every prompt. Null
- *   until the first summary lands. Branches revisiting an older
- *   message show the latest prompt's summary (known limitation).
- * - `lastMessageSentTime`: stamped on every user prompt; drives
- *   the sidebar's "Recent activity" sort.
- */
-export const sessionMeta = z.object({
-  sessionId: z.string(),
-  summary: z
-    .object({
-      text: z.string(),
-      model: z.string(),
-      generatedAt: z.number(),
-    })
-    .nullable(),
-  lastMessageSentTime: z.number(),
 });
 
 // ---------------------------------------------------------------------------

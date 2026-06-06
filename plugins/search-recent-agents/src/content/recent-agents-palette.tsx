@@ -11,7 +11,6 @@ import {
   selectChatInRoot,
 } from "@/lib/window-state/selection"
 import { requestFocusComposer } from "@/lib/focus-composer"
-import { useSummary } from "@/hooks/use-summary"
 import type { Schema } from "@host/main/schema"
 
 type Chat = Schema["chats"][string]
@@ -194,8 +193,7 @@ function AgentRow({
 }) {
   const sessionId =
     chat.session.kind === "ready" ? chat.session.sessionId : null
-  const summary = useSummary(sessionId)
-  const { label } = resolveChatLabel(chat, session, summary)
+  const { label } = resolveChatLabel(chat, session)
   const fallback = chatLabel(chat, { [sessionId ?? ""]: session })
   // Same predicate as `chat-pane-container` / the agent sidebar:
   // a session has unread when its last completed turn is newer

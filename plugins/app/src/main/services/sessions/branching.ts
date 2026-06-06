@@ -102,6 +102,11 @@ export async function createChatSession(args: {
   if (!sessionFile) {
     throw new Error("SessionManager did not produce a session file")
   }
+  const title = args.title ?? "Untitled"
+  if (args.title?.trim()) {
+    sm.appendSessionInfo(args.title.trim())
+  }
+
   // Force pi's SessionManager to write the session header to disk
   // NOW, before we discard `sm`. Without this, the file stays
   // in-memory-only until something appends an entry, and our
@@ -131,11 +136,12 @@ export async function createChatSession(args: {
     scopeId: args.scopeId,
     parentSessionId: args.parentSessionId ?? null,
     parentEntryId: args.parentEntryId ?? null,
-    title: args.title ?? "Untitled",
+    title,
     sessionFile,
     piSessionId: sessionId,
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
+    lastMessageSentTime: null,
     archived: false,
     model: null,
     thinkingLevel: "medium",
@@ -191,6 +197,8 @@ export async function fork(args: {
   if (!childFile) {
     throw new Error("forked SessionManager did not produce a session file")
   }
+  const title = args.title ?? `${parent.title} (fork)`
+  newSm.appendSessionInfo(title)
   // Same persist-before-discard contract as createChatSession.
   flushSessionManagerHeader({ sm: newSm })
 
@@ -208,11 +216,12 @@ export async function fork(args: {
       scopeId,
       parentSessionId: parent.id,
       parentEntryId: args.entryId,
-      title: args.title ?? `${parent.title} (fork)`,
+      title,
       sessionFile: childFile,
       piSessionId: childId,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
+      lastMessageSentTime: null,
       archived: false,
       model: null,
       thinkingLevel: "medium",
@@ -299,6 +308,9 @@ export async function clone(args: {
   if (!childFile) {
     throw new Error("cloned SessionManager did not produce a session file")
   }
+  const title = args.title ?? `${parent.title} (clone)`
+  newSm.appendSessionInfo(title)
+
   // Same persist-before-discard contract as createChatSession.
   // Note: `sourceSm.createBranchedSession` already wrote the
   // file IF the branch contains an assistant message. If the
@@ -315,28 +327,18 @@ export async function clone(args: {
   const chatId = nanoid()
   const scopeId = parentScope.id
 
-  // Same summary-carry trick as `forkAtUserMessage`: copy the
-  // parent's AI summary so the cloned chat shows it in the
-  // sidebar instead of "Untitled (clone)".
-  const parentMeta = svc.ctx.db.client.readRoot().app.sessionMeta[parent.id]
   await svc.ctx.db.client.update(root => {
-    if (parentMeta?.summary) {
-      root.app.sessionMeta[childId] = {
-        sessionId: childId,
-        summary: { ...parentMeta.summary },
-        lastMessageSentTime: Date.now(),
-      }
-    }
     root.app.sessions[childId] = {
       id: childId,
       scopeId,
       parentSessionId: parent.id,
       parentEntryId: leafId,
-      title: args.title ?? `${parent.title} (clone)`,
+      title,
       sessionFile: childFile,
       piSessionId: childId,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
+      lastMessageSentTime: null,
       archived: false,
       model: parent.model,
       thinkingLevel: parent.thinkingLevel,
@@ -385,12 +387,10 @@ export async function clone(args: {
   // eventLog (not pi's session entries) because it's purely a
   // UI marker — pi has no concept of "this session was cloned".
   //
-  // `parentTitle` is the *fallback* label used by the marker
-  // when the parent's sessionMeta isn't resolvable at render
-  // time (parent deleted, etc). Stamp it with the parent's
-  // *resolved* label — AI summary first, then branch summary,
-  // then the raw title field — so even the fallback path
-  // doesn't show the literal string "Untitled".
+  // `parentTitle` is the fallback label used by the marker when
+  // the parent no longer exists. Stamp it with the cached Pi
+  // session name so the marker doesn't show the literal string
+  // "Untitled".
   childLive.seq++
   const cloneEvent: EventItem = {
     seq: childLive.seq,
@@ -514,39 +514,26 @@ export async function forkAtUserMessage(args: {
   const scopeId = parentScope.id
   const tabId = nanoid()
 
-  // Carry forward the parent's AI summary so the new chat
-  // surfaces a meaningful label in the sidebar (instead of
-  // falling all the way back to "New Chat" / `${parent.title}
-  // (fork)`). resolveChatLabel reads from
-  // `sessionMeta[id].summary` first, so copying that bit is
-  // enough — we don't need to touch the title field.
-  const parentMeta = svc.ctx.db.client.readRoot().app.sessionMeta[parent.id]
+  const title = `${parent.title} (fork)`
+  newSm.appendSessionInfo(title)
+  flushSessionManagerHeader({ sm: newSm })
+
   // SINGLE db update: session record + chat record + persisted
   // draft + new active tab. Everything the renderer needs to mount
   // the new chat with the forked message in the composer lands in
   // one transaction; the renderer sees no intermediate state.
   await svc.ctx.db.client.update(root => {
-    if (parentMeta?.summary) {
-      root.app.sessionMeta[childId] = {
-        sessionId: childId,
-        summary: { ...parentMeta.summary },
-        // Fresh fork — stamp lastMessageSentTime as "now" so the
-        // sidebar surfaces the new chat near the top of
-        // recent-activity, not back where the parent originally
-        // ran.
-        lastMessageSentTime: Date.now(),
-      }
-    }
     root.app.sessions[childId] = {
       id: childId,
       scopeId,
       parentSessionId: parent.id,
       parentEntryId: args.entryId,
-      title: `${parent.title} (fork)`,
+      title,
       sessionFile: childFile,
       piSessionId: childId,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
+      lastMessageSentTime: null,
       archived: false,
       model: parent.model,
       thinkingLevel: parent.thinkingLevel,

@@ -10,7 +10,6 @@ import {
 } from "./workspace";
 import {
   session,
-  sessionMeta,
   killedSession,
   reloadToast,
   chat,
@@ -45,7 +44,6 @@ const schema = createSchema({
   terminals: z.record(z.string(), terminal).default({}),
   fileTreeIndexes: z.record(z.string(), fileTreeIndex).default({}),
   models: z.record(z.string(), modelInfo).default({}),
-  sessionMeta: z.record(z.string(), sessionMeta).default({}),
   /** Sessions whose in-flight agent run was killed by a hot reload
    * or shutdown. Surfaced as a Continue/Dismiss toast. */
   killedSessions: z.record(z.string(), killedSession).default({}),

@@ -1,7 +1,6 @@
 import os from "node:os"
 import path from "node:path"
 import { nanoid } from "nanoid"
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai"
 import {
   type AgentSessionEvent,
   type CreateAgentSessionOptions,
@@ -15,7 +14,6 @@ import {
   formatExtraDirsPrompt,
 } from "../../lib/extra-dirs"
 import { createAppPiExtensionFactories } from "../../pi-extensions"
-import { summarizeUserMessage } from "../../summaries/summarize-user-message"
 import { LiveSession } from "./live-session"
 import type { SessionsService } from "../sessions"
 
@@ -125,6 +123,10 @@ export async function activate(args: {
   }
 
   const { session } = await createAgentSession(options)
+  const existingTitle = record.title?.trim()
+  if (!session.sessionName && existingTitle && existingTitle !== "Untitled") {
+    session.setSessionName(existingTitle)
+  }
 
   const live = new LiveSession({
     sessionId,
@@ -443,40 +445,6 @@ export async function onPiEvent(args: {
     await syncRuntime({ svc, live })
   }
 
-  if (event.type === "message_end" && event.message.role === "user") {
-    void handleUserMessageForSummary({
-      svc,
-      live,
-      content: event.message.content,
-    })
-  }
-}
-
-/**
- * On every new user message, generate a fresh summary with the cheap
- * model and overwrite `root.app.sessionMeta[sessionId].summary`.
- * The renderer subscribes to the db directly, so writes propagate
- * automatically.
- */
-async function handleUserMessageForSummary(args: {
-  svc: Svc
-  live: LiveSession
-  content: string | (TextContent | ImageContent)[]
-}): Promise<void> {
-  const { svc, live, content } = args
-  try {
-    const text = await summarizeUserMessage(content)
-    if (!text) return
-    const piModel = live.pi.model
-    const modelKey = piModel ? `${piModel.provider}/${piModel.id}` : "unknown"
-    await svc.ctx.summaries.record({
-      sessionId: live.sessionId,
-      text,
-      model: modelKey,
-    })
-  } catch (err) {
-    console.warn("[summary] handleUserMessageForSummary failed:", err)
-  }
 }
 
 export async function syncRuntime(args: {
@@ -499,6 +467,7 @@ export async function syncRuntime(args: {
   await svc.ctx.db.client.update(root => {
     const s = root.app.sessions[live.sessionId]
     if (!s) return
+    s.title = pi.sessionName ?? "Untitled"
     s.model = modelRef
     s.thinkingLevel = thinkingLevel
     s.isStreaming = isStreaming
@@ -600,29 +569,16 @@ export function requireRecord(args: {
 
 /**
  * Snapshot of the human-readable label for a session at the time
- * of call. Mirrors the renderer-side precedence in
- * `agent-sidebar-pane.tsx#resolveChatLabel` but lives in the
- * main process so synthetic events (fork/clone markers) can
- * stamp the same value the user sees in the sidebar.
- *
- * Precedence: sessionMeta.summary.text → session.branchSummary
- * → session.title (skip the literal sentinel "Untitled") →
- * empty string. Callers use the empty string as a signal to
- * fall through to their own default ("previous session" etc).
+ * of call. Session display names are owned by Pi's session file;
+ * `session.title` is Zenbu's cached copy from `syncRuntime()`.
  */
 export function resolveSessionLabelSnapshot(args: {
   svc: Svc
   sessionId: string
 }): string {
   const { svc, sessionId } = args
-  const root = svc.ctx.db.client.readRoot()
-  const summary = root.app.sessionMeta[sessionId]?.summary?.text?.trim()
-  if (summary) return summary
-  const session = root.app.sessions[sessionId]
-  if (!session) return ""
-  const branchSummary = session.branchSummary?.trim()
-  if (branchSummary) return branchSummary
-  const title = session.title?.trim()
+  const session = svc.ctx.db.client.readRoot().app.sessions[sessionId]
+  const title = session?.title?.trim()
   if (title && title !== "Untitled") return title
   return ""
 }
