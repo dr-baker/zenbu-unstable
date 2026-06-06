@@ -12,19 +12,20 @@ import { definePlugin } from "@zenbujs/core/config";
  *  - a `plan` view (`src/views/plan/`) that renders the Markdown
  *    in a split pane (mermaid diagrams included via Streamdown).
  *
- * The plugin reaches into the host through two generic primitives —
- * `PiExtensionRegistryService.register(...)` and the host's
- * `openViewInActivePane` event — so the host stays free of any
- * `plan`-specific code.
+ * The plugin reaches into Zenbu through two generic primitives —
+ * the Pi plugin's `PiRuntimeService.registerExtension(...)` seam and
+ * the app plugin's `openViewInActivePane` event — so the app stays
+ * free of any `plan`-specific Pi code.
  */
 export default definePlugin({
   name: "plan",
   services: ["./src/main/services/*.ts"],
   dependsOn: [
     // Required for typed access to the host's RPC (`rpc.app.openViewInActivePane`
-    // emit) and to import the `PiExtensionRegistryService` class as a service
-    // dependency.
+    // emit) and generated DB/events surface used by the renderer advice.
     { name: "app", from: "../../zenbu.config.ts" },
+    // Required for the Pi runtime extension-registration seam.
+    { name: "pi", from: "../pi/zenbu.plugin.ts" },
   ],
   icons: {
     // lucide: list-checks

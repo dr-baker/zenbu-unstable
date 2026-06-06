@@ -1,0 +1,18 @@
+{
+  "id": "12c88a84-6f8b-44b8-b1b2-aadda0fd614f",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "fields": {
+    "extensions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "cd6fcdb17433f9fc",
+      "default": {}
+    },
+    "runtimeCommands": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "223fb893d28e1c0e",
+      "default": {}
+    }
+  }
+}

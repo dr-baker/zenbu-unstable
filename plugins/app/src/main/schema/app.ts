@@ -103,23 +103,6 @@ export const recentProject = z.object({
 // ---------------------------------------------------------------------------
 
 /**
- * A Pi extension contributed by a zenbu plugin. `path` is an
- * absolute filesystem path to the extension's entry `.ts` file;
- * `SessionsService` feeds these into
- * `DefaultResourceLoader.additionalExtensionPaths`.
- */
-export const piExtension = z.object({
-  id: z.string(),
-  path: z.string(),
-  meta: z
-    .object({
-      label: z.string().optional(),
-      pluginName: z.string().optional(),
-    })
-    .default({}),
-});
-
-/**
  * A command palette action contributed by a plugin.
  * `rpc.{plugin,service,method}` is dispatched in the main process
  * when the user picks the action, always with `{ windowId }` plus

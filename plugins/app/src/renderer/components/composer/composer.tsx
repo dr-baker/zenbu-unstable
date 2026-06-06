@@ -119,7 +119,7 @@ export type ComposerProps = {
 
 const DEFAULT_PLACEHOLDER = "/ for commands, @ for context"
 const MAX_FILE_RESULTS = 200
-const MAX_SLASH_RESULTS = 50
+const MAX_SLASH_RESULTS = 200
 
 type MenuAnchor = { left: number; top: number; bottom: number }
 type FileMenuState = {
@@ -488,7 +488,7 @@ export function Composer({
         const ranked = rankEntries(
           slashRef.current,
           trigger.query,
-          c => `${c.label} ${c.id}`,
+          c => `${c.label} ${c.id} ${c.group ?? ""} ${c.hint ?? ""} ${c.description ?? ""}`,
           MAX_SLASH_RESULTS,
         )
         if (ranked.length === 0) {

@@ -1,8 +1,11 @@
 {
 	"plugins": [
 		{ "path": "./plugins/app/zenbu.plugin.ts", "enabled": true },
+		{ "path": "./plugins/pi/zenbu.plugin.ts", "enabled": true },
+		{ "path": "./plugins/pi-auto-commands/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/pi-commands/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/plan/zenbu.plugin.ts", "enabled": true },
+		{ "path": "./plugins/code-rendering/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/agent-sidebar/zenbu.plugin.ts", "enabled": false },
 		{ "path": "./plugins/context-sidebar/zenbu.plugin.ts", "enabled": false },
 		{ "path": "./plugins/file-tree-sidebar/zenbu.plugin.ts", "enabled": false },

@@ -56,19 +56,14 @@ export async function activate(args: {
     )
   }
   const sm = SessionManager.open(record.sessionFile, PI_SESSION_DIR)
-
-  // Snapshot plugin-contributed Pi extension paths at activation
-  // time. App-owned extensions are loaded in memory below via
-  // `extensionFactories`; external zenbu plugins (e.g. the plan
-  // plugin) still register filesystem paths and get loaded by Pi's
-  // normal extension discovery via `additionalExtensionPaths`.
-  // Existing live sessions ignore later registry changes — see
-  // `PiExtensionRegistryService` for the rationale.
-  const additionalExtensionPaths = svc.ctx.piExtensionRegistry
-    .list()
-    .map(e => e.path)
-  const agentDir = getAgentDir()
   const scopeId = record.scopeId
+  const piConfig = (await svc.piRuntime?.getSessionConfig?.({
+    sessionId,
+    scopeId,
+    cwd: scope.directory,
+  })) ?? { extensionPaths: [], eventBus: undefined }
+  const additionalExtensionPaths = piConfig.extensionPaths
+  const agentDir = getAgentDir()
   // The two override closures below intentionally re-read the scope
   // from the db on every call rather than capturing the snapshot
   // taken at activation time. That way, a later
@@ -84,6 +79,10 @@ export async function activate(args: {
     cwd: scope.directory,
     agentDir,
     additionalExtensionPaths,
+    eventBus: piConfig.eventBus,
+    // TODO(pi-plugin-boundary): migrate these app-owned Pi built-ins
+    // (`bash-timeout`, `zenbu-house-rules`) into plugins/pi as
+    // path-based built-in extensions.
     extensionFactories: [...createAppPiExtensionFactories(scope.directory)],
     // Concatenate pi's primary-cwd AGENTS.md scan with one
     // `loadProjectContextFiles` call per extra dir. Pi feeds
@@ -161,6 +160,7 @@ export async function activate(args: {
   })
   live.addDisposer(unsubscribeScopes)
 
+  await svc.syncPiRuntimeCommands(live)
   await syncRuntime({ svc, live })
   return live
 }

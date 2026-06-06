@@ -6,6 +6,10 @@ export type SlashCommand = {
   id: string
   label: string
   description?: string
+  /** Optional group header in the typeahead menu. */
+  group?: string
+  /** Short provenance/status text rendered on the right side. */
+  hint?: string
   /** When set, picking this command fires `onAction(action)` and clears the input. */
   action?: string
   /** When set, picking this command replaces the trigger with this text. */

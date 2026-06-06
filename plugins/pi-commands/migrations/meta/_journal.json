@@ -1,0 +1,11 @@
+{
+  "version": "1",
+  "entries": [
+    {
+      "idx": 0,
+      "tag": "migration",
+      "when": 1780723259972,
+      "file": "migration_1780723259972"
+    }
+  ]
+}
