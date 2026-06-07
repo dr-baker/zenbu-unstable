@@ -6,6 +6,7 @@ import {
   RpcService,
 } from "@zenbujs/core/services"
 import { nanoid } from "nanoid"
+import { ShellEnvService } from "./shell-env"
 
 type IPty = {
   pid: number
@@ -70,6 +71,7 @@ export class TerminalService extends Service.create({
   deps: {
     rpc: RpcService,
     db: DbService,
+    shellEnv: ShellEnvService,
   },
 }) {
   private readonly terminals = new Map<string, TerminalEntry>()
@@ -112,7 +114,7 @@ export class TerminalService extends Service.create({
         createdAt: Date.now(),
       }
     })
-    this.spawnFor(terminalId, args.scopeId, args.cwd, initialTitle, {
+    await this.spawnFor(terminalId, args.scopeId, args.cwd, initialTitle, {
       cols: args.cols,
       rows: args.rows,
     })
@@ -139,7 +141,7 @@ export class TerminalService extends Service.create({
     if (!entry) {
       const record = this.ctx.db.client.readRoot().app.terminals[args.terminalId]
       if (!record) throw new Error(`terminal ${args.terminalId} does not exist`)
-      entry = this.spawnFor(record.id, record.scopeId, record.cwd, record.title, {
+      entry = await this.spawnFor(record.id, record.scopeId, record.cwd, record.title, {
         cols: args.cols,
         rows: args.rows,
       })
@@ -246,21 +248,23 @@ export class TerminalService extends Service.create({
     }
   }
 
-  private spawnFor(
+  private async spawnFor(
     terminalId: string,
     scopeId: string,
     cwd: string,
     currentTitle: string,
     sizing: { cols?: number; rows?: number },
-  ): TerminalEntry {
+  ): Promise<TerminalEntry> {
     const shell = pickShell()
+    // login-shell env so PATH etc. match a real terminal
+    const baseEnv = await this.ctx.shellEnv.getEnv()
     const pty = this.spawn(shell, [], {
       name: "xterm-256color",
       cols: sizing.cols ?? 80,
       rows: sizing.rows ?? 24,
       cwd,
       env: {
-        ...process.env,
+        ...baseEnv,
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
       },

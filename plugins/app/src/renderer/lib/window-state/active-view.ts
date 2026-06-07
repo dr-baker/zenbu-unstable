@@ -119,9 +119,9 @@ export function useShowOnboardingView() {
 
 export function useWorkspaceRailOpen(): boolean {
   const windowId = useWindowId();
-  // Off by default; user opts in via ⌘⇧B.
+  // On by default; user toggles via ⌘⇧B.
   return useDb(
-    (root) => root.app.windowStates[windowId]?.workspaceRailOpen ?? false,
+    (root) => root.app.windowStates[windowId]?.workspaceRailOpen ?? true,
   );
 }
 
@@ -132,7 +132,7 @@ export function useSetWorkspaceRailOpen() {
     (open: boolean | ((prev: boolean) => boolean)) => {
       void client.update((root) => {
         const ws = ensureWindowState(root, windowId);
-        const prev = ws.workspaceRailOpen ?? false;
+        const prev = ws.workspaceRailOpen ?? true;
         ws.workspaceRailOpen = typeof open === "function" ? open(prev) : open;
       });
     },

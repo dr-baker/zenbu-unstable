@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/search-recent-worktrees",
+  "description": "Switch to a checked-out branch fast",
   "version": "0.1.0",
   "private": true,
   "type": "module",

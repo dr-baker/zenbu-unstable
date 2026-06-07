@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/open-in",
+  "description": "Open projects in your other tools",
   "version": "0.1.0",
   "private": true,
   "type": "module",

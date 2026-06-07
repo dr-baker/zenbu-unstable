@@ -5,10 +5,10 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-} from "react"
-import { useDb, useRpc } from "@zenbujs/core/react"
-import { cn } from "@/lib/utils"
-import { defaultWorktreePath } from "@/lib/worktree-paths"
+} from "react";
+import { useDb, useRpc } from "@zenbujs/core/react";
+import { cn } from "@/lib/utils";
+import { defaultWorktreePath } from "@/lib/worktree-paths";
 
 /**
  * `/workspace` slash-command panel. Replaces the composer surface
@@ -49,24 +49,24 @@ export type WorkspaceSelectorProps = {
   /** Scope the chat is currently parked in. Used to look up the
    * repo + main-worktree path for the default-path derivation, and
    * to query its working-tree dirtiness. */
-  scopeId: string
+  scopeId: string;
   /** Whether the underlying agent session is currently streaming.
    * Surface-only — purely so we can show a "will interrupt
    * current turn" hint. The RPC does the actual abort. */
-  isStreaming: boolean
+  isStreaming: boolean;
   /** Fired with the trimmed branch name + derived worktree path
    * + optional commit-first instructions when the user confirms.
    * Caller is responsible for the RPC. */
   onConfirm: (args: {
-    branch: string
-    worktreePath: string
+    branch: string;
+    worktreePath: string;
     /** When set, the RPC commits the source's uncommitted changes
      * before creating the worktree so they're carried forward.
      * Empty `message` → auto-generated marker on the main side. */
-    commitFirst?: { message: string }
-  }) => Promise<void> | void
-  onCancel: () => void
-}
+    commitFirst?: { message: string };
+  }) => Promise<void> | void;
+  onCancel: () => void;
+};
 
 export function WorkspaceSelector({
   scopeId,
@@ -74,22 +74,22 @@ export function WorkspaceSelector({
   onConfirm,
   onCancel,
 }: WorkspaceSelectorProps) {
-  const rpc = useRpc()
+  const rpc = useRpc();
 
   // Resolve repo + main-worktree path from the chat's scope. Both
   // live in the replica already — see `ReposService` for how the
   // repo record gets seeded/synced.
-  const scope = useDb(root => root.app.scopes[scopeId])
-  const repo = useDb(root =>
+  const scope = useDb((root) => root.app.scopes[scopeId]);
+  const repo = useDb((root) =>
     scope?.repoId ? root.app.repos[scope.repoId] : undefined,
-  )
-  const mainWorktreePath = repo?.mainWorktreePath ?? null
-  const directory = scope?.directory ?? null
+  );
+  const mainWorktreePath = repo?.mainWorktreePath ?? null;
+  const directory = scope?.directory ?? null;
 
-  const [branch, setBranch] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [hasFocus, setHasFocus] = useState(true)
+  const [branch, setBranch] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hasFocus, setHasFocus] = useState(true);
 
   // Dirty-detection state. `undefined` = haven't checked yet (shows
   // no UI), then a concrete result. We never block on the check —
@@ -97,52 +97,52 @@ export function WorkspaceSelector({
   // section just won't appear.
   const [dirty, setDirty] = useState<
     { dirty: boolean; changed: number; untracked: number } | undefined
-  >(undefined)
+  >(undefined);
   // User's choice for the dirty case: bring the changes (commit
   // first) vs leave them in place. Default OFF so users who don't
   // care don't accidentally land an "auto-generated commit" they
   // didn't want.
-  const [commitFirst, setCommitFirst] = useState(false)
-  const [commitMessage, setCommitMessage] = useState("")
+  const [commitFirst, setCommitFirst] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
 
   useEffect(() => {
-    if (!directory) return
-    let cancelled = false
+    if (!directory) return;
+    let cancelled = false;
     rpc.app.git
       .getStatusSummary({ directory })
-      .then(s => {
-        if (cancelled) return
+      .then((s) => {
+        if (cancelled) return;
         if (!s.isRepo) {
-          setDirty({ dirty: false, changed: 0, untracked: 0 })
-          return
+          setDirty({ dirty: false, changed: 0, untracked: 0 });
+          return;
         }
-        const changed = s.changed
-        const untracked = s.untracked
+        const changed = s.changed;
+        const untracked = s.untracked;
         setDirty({
           dirty: changed + untracked > 0,
           changed,
           untracked,
-        })
+        });
       })
-      .catch(err => {
-        if (cancelled) return
+      .catch((err) => {
+        if (cancelled) return;
         // Status check failure is non-fatal — treat as clean so the
         // panel still lets the user proceed. The actual commit step
         // will surface any real git error.
-        console.warn("[workspace-selector] status check failed:", err)
-        setDirty({ dirty: false, changed: 0, untracked: 0 })
-      })
+        console.warn("[workspace-selector] status check failed:", err);
+        setDirty({ dirty: false, changed: 0, untracked: 0 });
+      });
     return () => {
-      cancelled = true
-    }
-  }, [rpc, directory])
+      cancelled = true;
+    };
+  }, [rpc, directory]);
 
   const derivedPath = useMemo(() => {
-    if (!mainWorktreePath) return ""
-    const trimmed = branch.trim()
-    if (!trimmed) return ""
-    return defaultWorktreePath(mainWorktreePath, trimmed)
-  }, [mainWorktreePath, branch])
+    if (!mainWorktreePath) return "";
+    const trimmed = branch.trim();
+    if (!trimmed) return "";
+    return defaultWorktreePath(mainWorktreePath, trimmed);
+  }, [mainWorktreePath, branch]);
 
   // Scope-level guardrail: if the chat's scope isn't a git repo, we
   // can't make a worktree. Surface inline rather than throwing from
@@ -153,25 +153,25 @@ export function WorkspaceSelector({
       ? "This chat's working directory is not a git repository."
       : !mainWorktreePath
         ? "Repo metadata still syncing — try again in a moment."
-        : null
+        : null;
 
   const canSubmit =
-    cannotProceedReason === null && branch.trim().length > 0 && !busy
+    cannotProceedReason === null && branch.trim().length > 0 && !busy;
 
-  const containerRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   // Autofocus the branch input so the user can start typing
   // immediately. Container focus styling falls through via DOM
   // bubbling.
   useLayoutEffect(() => {
-    inputRef.current?.focus()
-  }, [])
+    inputRef.current?.focus();
+  }, []);
 
   const handleSubmit = async () => {
-    if (!canSubmit || !mainWorktreePath) return
-    const trimmed = branch.trim()
-    setBusy(true)
-    setError(null)
+    if (!canSubmit || !mainWorktreePath) return;
+    const trimmed = branch.trim();
+    setBusy(true);
+    setError(null);
     try {
       await onConfirm({
         branch: trimmed,
@@ -179,14 +179,14 @@ export function WorkspaceSelector({
         commitFirst: commitFirst
           ? { message: commitMessage.trim() }
           : undefined,
-      })
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setBusy(false)
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
     }
     // On success the caller dismounts the panel — leaving `busy`
     // true avoids a flash of "Create" between resolve and dismount.
-  }
+  };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (busy) {
@@ -194,21 +194,21 @@ export function WorkspaceSelector({
       // the worktree may be half-created but that's a user-visible
       // artifact rather than data corruption.
       if (e.key === "Escape") {
-        e.preventDefault()
-        onCancel()
+        e.preventDefault();
+        onCancel();
       }
-      return
+      return;
     }
     if (e.key === "Escape") {
-      e.preventDefault()
-      onCancel()
-      return
+      e.preventDefault();
+      onCancel();
+      return;
     }
     if (e.key === "Enter") {
-      e.preventDefault()
-      void handleSubmit()
+      e.preventDefault();
+      void handleSubmit();
     }
-  }
+  };
 
   return (
     <div className="mx-auto w-full max-w-[919px] px-2 pt-1 pb-2">
@@ -217,10 +217,10 @@ export function WorkspaceSelector({
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         onFocus={() => setHasFocus(true)}
-        onBlur={e => {
-          const next = e.relatedTarget as Node | null
-          if (next && containerRef.current?.contains(next)) return
-          setHasFocus(false)
+        onBlur={(e) => {
+          const next = e.relatedTarget as Node | null;
+          if (next && containerRef.current?.contains(next)) return;
+          setHasFocus(false);
         }}
         className={cn(
           "flex max-h-[50vh] min-h-0 flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg outline-none",
@@ -233,10 +233,13 @@ export function WorkspaceSelector({
         <Body
           inputRef={inputRef}
           branch={branch}
-          onBranchChange={v => {
-            setBranch(v)
+          onBranchChange={(v) => {
+            // Branch refs can't contain spaces — turn any run of
+            // whitespace into a single hyphen as the user types, so
+            // hitting space produces a dash inline.
+            setBranch(v.replace(/\s+/g, "-"));
             // Clear the prior error as soon as the user edits.
-            if (error) setError(null)
+            if (error) setError(null);
           }}
           derivedPath={derivedPath}
           cannotProceedReason={cannotProceedReason}
@@ -249,15 +252,13 @@ export function WorkspaceSelector({
           onCommitMessageChange={setCommitMessage}
         />
         <Footer
-          canSubmit={canSubmit}
           busy={busy}
           commitFirst={commitFirst}
-          onSubmit={() => void handleSubmit()}
           onCancel={onCancel}
         />
       </div>
     </div>
-  )
+  );
 }
 
 function Header({ isStreaming }: { isStreaming: boolean }) {
@@ -270,13 +271,11 @@ function Header({ isStreaming }: { isStreaming: boolean }) {
       </div>
       {isStreaming ? (
         <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-          <span className="text-foreground">
-            will interrupt current turn
-          </span>
+          <span className="text-foreground">will interrupt current turn</span>
         </div>
       ) : null}
     </div>
-  )
+  );
 }
 
 function Body({
@@ -293,21 +292,21 @@ function Body({
   commitMessage,
   onCommitMessageChange,
 }: {
-  inputRef: React.RefObject<HTMLInputElement | null>
-  branch: string
-  onBranchChange: (v: string) => void
-  derivedPath: string
-  cannotProceedReason: string | null
-  error: string | null
-  disabled: boolean
-  dirty: { dirty: boolean; changed: number; untracked: number } | undefined
-  commitFirst: boolean
-  onCommitFirstChange: (v: boolean) => void
-  commitMessage: string
-  onCommitMessageChange: (v: string) => void
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  branch: string;
+  onBranchChange: (v: string) => void;
+  derivedPath: string;
+  cannotProceedReason: string | null;
+  error: string | null;
+  disabled: boolean;
+  dirty: { dirty: boolean; changed: number; untracked: number } | undefined;
+  commitFirst: boolean;
+  onCommitFirstChange: (v: boolean) => void;
+  commitMessage: string;
+  onCommitMessageChange: (v: string) => void;
 }) {
-  const showDirtySection = dirty?.dirty ?? false
-  const dirtyFilesTotal = dirty ? dirty.changed + dirty.untracked : 0
+  const showDirtySection = dirty?.dirty ?? false;
+  const dirtyFilesTotal = dirty ? dirty.changed + dirty.untracked : 0;
   return (
     <div className="min-h-0 flex-1 overflow-auto px-3 py-2 flex flex-col gap-2">
       <label className="flex flex-col gap-1">
@@ -319,7 +318,7 @@ function Body({
           type="text"
           value={branch}
           disabled={disabled || cannotProceedReason !== null}
-          onChange={e => onBranchChange(e.target.value)}
+          onChange={(e) => onBranchChange(e.target.value)}
           placeholder="my-feature"
           className={cn(
             "w-full rounded-md border border-border bg-background px-2 py-1.5 text-[12px] text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -337,7 +336,7 @@ function Body({
             derivedPath ? "text-foreground" : "text-muted-foreground/60",
           )}
         >
-          {derivedPath || "(enter a branch name)"}
+          {derivedPath}
         </span>
       </div>
 
@@ -353,13 +352,13 @@ function Body({
               type="checkbox"
               checked={commitFirst}
               disabled={disabled}
-              onChange={e => onCommitFirstChange(e.target.checked)}
+              onChange={(e) => onCommitFirstChange(e.target.checked)}
               className="mt-0.5 h-3 w-3"
               // Use a mousedown handler so clicking the checkbox
               // doesn't steal focus from the container's keyboard
               // handler. (React still fires onChange for the
               // click.)
-              onMouseDown={e => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
             />
             <span>
               Current worktree has{" "}
@@ -373,13 +372,14 @@ function Body({
           {commitFirst && (
             <label className="flex flex-col gap-1 pl-5">
               <span className="text-[10px] text-muted-foreground">
-                Commit message (optional — leave blank for an auto-generated marker)
+                Commit message (optional — leave blank for an auto-generated
+                marker)
               </span>
               <input
                 type="text"
                 value={commitMessage}
                 disabled={disabled}
-                onChange={e => onCommitMessageChange(e.target.value)}
+                onChange={(e) => onCommitMessageChange(e.target.value)}
                 placeholder="(auto-generated commit)"
                 className={cn(
                   "w-full rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -405,27 +405,25 @@ function Body({
         </div>
       )}
     </div>
-  )
+  );
 }
 
 function Footer({
-  canSubmit,
   busy,
   commitFirst,
-  onSubmit,
   onCancel,
 }: {
-  canSubmit: boolean
-  busy: boolean
-  commitFirst: boolean
-  onSubmit: () => void
-  onCancel: () => void
+  busy: boolean;
+  commitFirst: boolean;
+  onCancel: () => void;
 }) {
   return (
     <div className="shrink-0 border-t border-border bg-muted/30 px-3 py-1 flex items-center justify-between text-[10px] text-muted-foreground">
       {busy ? (
         <span className="text-shimmer">
-          {commitFirst ? "Committing + creating worktree…" : "Creating worktree…"}
+          {commitFirst
+            ? "Committing + creating worktree…"
+            : "Creating worktree…"}
         </span>
       ) : (
         <button
@@ -436,14 +434,6 @@ function Footer({
           ← cancel
         </button>
       )}
-      <button
-        type="button"
-        onClick={onSubmit}
-        disabled={!canSubmit}
-        className="font-medium text-foreground disabled:opacity-50"
-      >
-        create ⏎
-      </button>
     </div>
-  )
+  );
 }

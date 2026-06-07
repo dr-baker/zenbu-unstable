@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/plugin-dev",
+  "description": "Live-reload a plugin while you build it",
   "version": "0.1.0",
   "private": true,
   "type": "module",

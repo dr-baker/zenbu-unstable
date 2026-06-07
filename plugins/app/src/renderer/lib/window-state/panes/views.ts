@@ -149,7 +149,7 @@ export function openViewBySourceInRoot(
   viewType: string,
   source: string,
   args: Record<string, unknown> = {},
-  placement: "left" | "right" = "right",
+  placement: "left" | "right" | "tab" = "right",
 ): boolean {
   const ws = root.app.windowStates[windowId]
   if (!ws) return false
@@ -177,6 +177,34 @@ export function openViewBySourceInRoot(
   }
 
   if (state.panes.length === 0) return false
+
+  const activePane =
+    state.panes.find(p => p.id === state.activePaneId) ?? state.panes[0]!
+
+  // `placement: "tab"` — no matching source tab exists yet, so open
+  // the view as a new tab in the active pane (next to its current
+  // tab) instead of spawning a sibling pane / split.
+  if (placement === "tab") {
+    const paneIdx = state.panes.findIndex(p => p.id === activePane.id)
+    if (paneIdx < 0) return false
+    const pane = state.panes[paneIdx]!
+    const tabId = nanoid()
+    const activeTabIdx = pane.tabs.findIndex(t => t.id === pane.activeTabId)
+    const insertAt = activeTabIdx < 0 ? pane.tabs.length : activeTabIdx + 1
+    state.panes[paneIdx] = {
+      ...pane,
+      tabs: [
+        ...pane.tabs.slice(0, insertAt),
+        makeTab(tabId, tabContent),
+        ...pane.tabs.slice(insertAt),
+      ],
+      activeTabId: tabId,
+    }
+    state.activePaneId = pane.id
+    setActiveScope(root, windowId, scopeId)
+    return true
+  }
+
   const paneId = nanoid()
   const tabId = nanoid()
   const newPane = {
@@ -184,8 +212,6 @@ export function openViewBySourceInRoot(
     tabs: [makeTab(tabId, tabContent)],
     activeTabId: tabId,
   }
-  const activePane =
-    state.panes.find(p => p.id === state.activePaneId) ?? state.panes[0]!
   const activeIdx = state.panes.findIndex(p => p.id === activePane.id)
   const insertAt =
     placement === "left"

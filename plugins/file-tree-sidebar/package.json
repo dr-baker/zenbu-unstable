@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/file-tree-sidebar",
+  "description": "Browse and open files in your project",
   "version": "0.1.0",
   "private": true,
   "type": "module",

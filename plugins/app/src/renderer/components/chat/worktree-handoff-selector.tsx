@@ -10,11 +10,11 @@ import { useDb, useRpc } from "@zenbujs/core/react"
 import { cn } from "@/lib/utils"
 import { ensureRowInView } from "@/lib/ensure-row-in-view"
 import { useHoverIntent } from "@/lib/hooks/use-hover-intent"
+import { openArchiveWorktreeDialog } from "@/lib/archive-worktree-dialog-store"
 
 /**
  * `/worktree-handoff` panel — one git operation per run, with a
- * keyboard-driven follow-up to archive the worktree and
- * (optionally) move the chat back to main.
+ * keyboard-driven follow-up to archive the worktree.
  *
  * Flow (all stages share the same picker shell so the panel
  * doesn't layout-shift when an operation kicks off):
@@ -32,11 +32,10 @@ import { useHoverIntent } from "@/lib/hooks/use-hover-intent"
  *   doneRebase    — after a successful rebase. "Test, then re-run
  *                   to land." Esc to close.
  *   askComplete   — after a successful FF. "Archive `<branch>`?"
- *                   ↵ yes (archives source scope + transitions to
- *                   askMove), esc closes.
- *   askMove       — only reached after the user picks yes on
- *                   askComplete. "Move this chat to the main
- *                   worktree?" ↵ yes (moves + closes), esc closes.
+ *                   ↵ yes opens the shared Archive-worktree
+ *                   confirmation dialog (same one the command
+ *                   palette / sidebar use) and closes the panel.
+ *                   esc closes.
  *
  * Conflict during rebase: not a stage. The main side has already
  * dropped the prompt into the composer; we call
@@ -54,12 +53,9 @@ export type WorktreeHandoffSelectorProps = {
   chatId: string
   /** Current chat's scope (the source of the handoff). */
   sourceScopeId: string
-  /** Active window id, needed for the move-to-main RPC so the
-   * window's selectedScopeId cache flips alongside the chat. */
-  windowId: string
   onCancel: () => void
   /** User dismissed a terminal view (done / askComplete:no /
-   * askMove). Close the panel. */
+   * archive handed off to the dialog). Close the panel. */
   onClose: () => void
   /** Conflict prompt was just emitted into the composer. Close
    * the panel immediately so the composer takes focus. */
@@ -94,17 +90,10 @@ type Stage =
       sourceBranch: string
       cursor: number
     }
-  | {
-      kind: "askMove"
-      target: Candidate
-      sourceBranch: string
-      cursor: number
-    }
 
 export function WorktreeHandoffSelector({
   chatId,
   sourceScopeId,
-  windowId,
   onCancel,
   onClose,
   onConflictHandedToComposer,
@@ -339,91 +328,16 @@ export function WorktreeHandoffSelector({
     }
   }
 
-  const acceptComplete = async (
-    s: Extract<Stage, { kind: "askComplete" }>,
+  const acceptComplete = (
+    _s: Extract<Stage, { kind: "askComplete" }>,
   ) => {
-    setError(null)
-    try {
-      await rpc.app.gitHandoff.archiveScope({
-        scopeId: sourceScopeId,
-      })
-      // (Intentionally no toast here — the askMove step that
-      // follows is the visible acknowledgement. Toaster is still
-      // mounted globally for future use.)
-      // Only offer to move the chat if we can identify a real
-      // main worktree to move it to. If the source IS the main
-      // worktree (uncommon — user handed off from main), there's
-      // nowhere to move.
-      const isAlreadyOnMain =
-        repo?.mainWorktreePath != null &&
-        sourceScope?.directory === repo.mainWorktreePath
-      if (isAlreadyOnMain) {
-        onClose()
-        return
-      }
-      setStage({
-        kind: "askMove",
-        target: s.target,
-        sourceBranch: s.sourceBranch,
-        cursor: 0,
-      })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  const acceptMove = async (
-    s: Extract<Stage, { kind: "askMove" }>,
-  ) => {
-    setError(null)
-    if (!repo || !sourceScope) {
-      onClose()
-      return
-    }
-    // Find the scope for the main worktree, in this workspace.
-    const mainScope = Object.values(allScopes).find(
-      x =>
-        x.workspaceId === sourceScope.workspaceId &&
-        x.directory === repo.mainWorktreePath,
-    )
-    if (!mainScope) {
-      setError(
-        "Main worktree isn't materialized as a scope in this workspace — open it from the sidebar first.",
-      )
-      return
-    }
-    setStage({
-      kind: "working",
-      label: "Working…",
-      target: s.target,
-    })
-    try {
-      const res = await rpc.app.sessions.moveChatToExistingScope({
-        chatId,
-        newScopeId: mainScope.id,
-        windowId,
-        bumpCreatedAt: true,
-      })
-      if (!res.ok) {
-        setError(res.error)
-        setStage({
-          kind: "askMove",
-          target: s.target,
-          sourceBranch: s.sourceBranch,
-          cursor: 0,
-        })
-        return
-      }
-      onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setStage({
-        kind: "askMove",
-        target: s.target,
-        sourceBranch: s.sourceBranch,
-        cursor: 0,
-      })
-    }
+    // Hand off to the shared Archive-worktree confirmation dialog
+    // (the same one the command palette and sidebar overflow menu
+    // open). It owns the "also delete the folder" choice and the
+    // actual archive mutation, so the handoff panel just opens it
+    // and gets out of the way.
+    openArchiveWorktreeDialog(sourceScopeId)
+    onClose()
   }
 
   // ---- keyboard ----
@@ -445,12 +359,8 @@ export function WorktreeHandoffSelector({
       }
       return
     }
-    if (stage.kind === "askComplete") {
-      onAskCompleteKey(e, stage)
-      return
-    }
-    // askMove
-    onAskMoveKey(e, stage)
+    // askComplete
+    onAskCompleteKey(e, stage)
   }
 
   const onAskCompleteKey = (
@@ -477,36 +387,7 @@ export function WorktreeHandoffSelector({
     }
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault()
-      if (s.cursor === 0) void acceptComplete(s)
-      else onClose()
-    }
-  }
-
-  const onAskMoveKey = (
-    e: KeyboardEvent<HTMLDivElement>,
-    s: Extract<Stage, { kind: "askMove" }>,
-  ) => {
-    const n = 2
-    if (e.key === "Escape") {
-      e.preventDefault()
-      onClose()
-      return
-    }
-    if (e.key === "ArrowUp" || e.key === "k") {
-      e.preventDefault()
-      hover.resetToKeyboard()
-      setStage({ ...s, cursor: (s.cursor - 1 + n) % n })
-      return
-    }
-    if (e.key === "ArrowDown" || e.key === "j") {
-      e.preventDefault()
-      hover.resetToKeyboard()
-      setStage({ ...s, cursor: (s.cursor + 1) % n })
-      return
-    }
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault()
-      if (s.cursor === 0) void acceptMove(s)
+      if (s.cursor === 0) acceptComplete(s)
       else onClose()
     }
   }
@@ -621,7 +502,7 @@ export function WorktreeHandoffSelector({
             reason={stage.reason}
             onClose={onClose}
           />
-        ) : stage.kind === "askComplete" ? (
+        ) : (
           <AskCompleteView
             sourceBranch={stage.sourceBranch}
             targetBranch={stage.target.branch ?? "target"}
@@ -631,25 +512,7 @@ export function WorktreeHandoffSelector({
               if (hover.isActive()) setStage({ ...stage, cursor: i })
             }}
             onPick={i => {
-              if (i === 0) void acceptComplete(stage)
-              else onClose()
-            }}
-            error={error}
-          />
-        ) : (
-          <AskMoveView
-            sourceBranch={stage.sourceBranch}
-            mainBranch={
-              repo?.mainWorktreePath
-                ? mainBranchLabel(repo, allScopes, sourceScope?.workspaceId)
-                : "main"
-            }
-            cursor={stage.cursor}
-            onCursor={i => {
-              if (hover.isActive()) setStage({ ...stage, cursor: i })
-            }}
-            onPick={i => {
-              if (i === 0) void acceptMove(stage)
+              if (i === 0) acceptComplete(stage)
               else onClose()
             }}
             error={error}
@@ -853,43 +716,12 @@ function AskCompleteView({
   )
 }
 
-function AskMoveView({
-  sourceBranch,
-  mainBranch,
-  cursor,
-  onCursor,
-  onPick,
-  error,
-}: {
-  sourceBranch: string
-  mainBranch: string
-  cursor: number
-  onCursor: (i: number) => void
-  onPick: (i: number) => void
-  error: string | null
-}) {
-  const options = [
-    { title: `Move this chat to \`${mainBranch}\`` },
-    { title: `Stay on \`${sourceBranch}\`` },
-  ]
-  return (
-    <OptionPickerView
-      title="Where should this chat go?"
-      options={options}
-      cursor={cursor}
-      onCursor={onCursor}
-      onPick={onPick}
-      error={error}
-    />
-  )
-}
-
 /**
- * Shared chrome for the two yes/no follow-ups (askComplete /
- * askMove). Same shape as the picker — header strip, a list of
+ * Shared chrome for the yes/no follow-up (askComplete). Same
+ * shape as the picker — header strip, a list of
  * keyboard-selectable option rows, optional error bar — so the
- * two stages read as siblings of pickTarget rather than ad-hoc
- * confirmation dialogs. Canonical reference: BranchSummaryPicker
+ * stage reads as a sibling of pickTarget rather than an ad-hoc
+ * confirmation dialog. Canonical reference: BranchSummaryPicker
  * in `chat/lib/branch-summary-choice.tsx`.
  */
 function OptionPickerView({
@@ -1020,31 +852,3 @@ function FixedStateMessage({
   )
 }
 
-// ---- helpers ----
-
-/**
- * Best-effort "what should we call the main branch?" for the
- * askMove copy. Reads through the workspace's main-worktree scope
- * to pick up its current branch from the repo's worktree list.
- */
-function mainBranchLabel(
-  repo: { mainWorktreePath: string | null; worktrees: ReadonlyArray<{ path: string; branch: string | null }> },
-  scopes: Record<string, { id: string; workspaceId: string; directory: string }>,
-  workspaceId: string | undefined,
-): string {
-  if (!repo.mainWorktreePath) return "main"
-  const wt = repo.worktrees.find(w => w.path === repo.mainWorktreePath)
-  if (wt?.branch) return wt.branch
-  if (workspaceId) {
-    const scope = Object.values(scopes).find(
-      s => s.workspaceId === workspaceId && s.directory === repo.mainWorktreePath,
-    )
-    if (scope) {
-      // No branch info on the scope itself; just return the
-      // directory's basename.
-      const parts = scope.directory.split("/")
-      return parts[parts.length - 1] || "main"
-    }
-  }
-  return "main"
-}

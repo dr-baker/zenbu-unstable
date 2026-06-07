@@ -225,9 +225,16 @@ export class FileTreeService extends Service.create({
         (_event, filename) => {
           // Skip events inside ignored dirs cheaply — the walker will
           // filter them too, but this saves us scheduling work.
-          if (typeof filename === "string") {
-            const top = filename.split(/[\\/]/, 1)[0]
-            if (top && IGNORE_DIRS.has(top)) return
+          // `fs.watch({ recursive: true })` reports paths relative to
+          // the watched root. When the watched root is a parent folder
+          // containing repos/worktrees, generated writes show up as e.g.
+          // `repo/.zenbu/db/...`, so checking only the first segment lets
+          // Zenbu's own DB writes trigger an endless reindex loop.
+          if (
+            typeof filename === "string" &&
+            shouldIgnoreWatchedPath(filename)
+          ) {
+            return
           }
           this.scheduleReindex(scopeId, directory)
         },
@@ -271,6 +278,9 @@ export class FileTreeService extends Service.create({
     const trace = process.env.ZENBU_FILE_TREE_TRACE === "1"
     let concatBatches = 0
     let concatItems = 0
+    const previousPathsRef = this.ctx.db.client.readRoot().app.fileTreeIndexes[
+      scopeId
+    ]?.paths ?? null
     const pathsRef = {
       collectionId: nanoid(),
       debugName: `file-tree-paths-${scopeId}`,
@@ -336,6 +346,15 @@ export class FileTreeService extends Service.create({
         cur.indexedAt = Date.now()
         cur.truncated = truncated
       })
+      if (
+        previousPathsRef &&
+        previousPathsRef.collectionId !== pathsRef.collectionId
+      ) {
+        await removeCollectionDir(
+          this.ctx.db.dbPath,
+          previousPathsRef.collectionId,
+        )
+      }
       if (trace) {
         console.info(
           `[fileTree-trace] indexScope done scope=${scopeId} paths=${paths.length} concats=${concatBatches} concatItems=${concatItems}`,
@@ -344,21 +363,42 @@ export class FileTreeService extends Service.create({
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       await this.ctx.db.client.update(root => {
-        const prev = root.app.fileTreeIndexes[scopeId]
+        const cur = root.app.fileTreeIndexes[scopeId]
         root.app.fileTreeIndexes[scopeId] = {
           scopeId,
           directory,
-          paths: prev?.paths ?? pathsRef,
+          paths: previousPathsRef ?? cur?.paths ?? pathsRef,
           status: "error",
           error: message,
-          indexedAt: prev?.indexedAt ?? 0,
-          truncated: prev?.truncated ?? false,
+          indexedAt: cur?.indexedAt ?? 0,
+          truncated: cur?.truncated ?? false,
         }
       })
+      if (
+        previousPathsRef &&
+        previousPathsRef.collectionId !== pathsRef.collectionId
+      ) {
+        await removeCollectionDir(this.ctx.db.dbPath, pathsRef.collectionId)
+      }
     } finally {
       this.indexing.delete(scopeId)
     }
   }
+}
+
+function shouldIgnoreWatchedPath(filename: string): boolean {
+  return filename.split(/[\\/]+/).some(segment => IGNORE_DIRS.has(segment))
+}
+
+async function removeCollectionDir(
+  dbPath: string,
+  collectionId: string,
+): Promise<void> {
+  if (!collectionId) return
+  await fs.rm(path.join(dbPath, "collections", collectionId), {
+    recursive: true,
+    force: true,
+  })
 }
 
 async function walk(

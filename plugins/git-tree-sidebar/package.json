@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/git-tree-sidebar",
+  "description": "Review your changes and open diffs",
   "version": "0.1.0",
   "private": true,
   "type": "module",

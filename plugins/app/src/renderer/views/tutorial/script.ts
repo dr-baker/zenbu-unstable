@@ -1,48 +1,48 @@
-import type { Choice, ChoicePrompt, Node } from "./types"
+import type { Choice, ChoicePrompt, Node } from "./types";
 
 const OPEN_PROJECT: Choice = {
   id: "open-project",
   label: "Open a project",
   next: "openProject",
-}
+};
 
 const CONTINUE_PLAYGROUND: Choice = {
   id: "continue-playground",
   label: "Continue in playground",
   next: "continueSandbox",
-}
+};
 
 const TOPIC_LABELS: Record<string, string> = {
   plugins: "Plugins",
   shortcuts: "Shortcuts",
-}
+};
 
 /** Quest prompt at the end of each topic node. Offers the
  * unvisited topics; once all are seen, adds the terminal actions
  * (open a project / continue in playground). */
 function suggestNext(args: {
-  visited: Set<string>
-  current: string
+  visited: Set<string>;
+  current: string;
 }): ChoicePrompt {
-  const { visited, current } = args
-  const allTopics = ["plugins", "shortcuts"]
-  const unvisited = allTopics.filter(t => t !== current && !visited.has(t))
+  const { visited, current } = args;
+  const allTopics = ["plugins", "shortcuts"];
+  const unvisited = allTopics.filter((t) => t !== current && !visited.has(t));
 
   const question = (() => {
-    if (unvisited.length === 0) return "Ready to open a project?"
-    if (current === "intro") return "Where would you like to start?"
-    return "Anything else you want to see?"
-  })()
+    if (unvisited.length === 0) return "Ready to open a project?";
+    if (current === "intro") return "Where would you like to start?";
+    return "Anything else you want to see?";
+  })();
 
-  const opts: Choice[] = []
+  const opts: Choice[] = [];
   for (const topic of unvisited) {
-    opts.push({ id: topic, label: TOPIC_LABELS[topic] ?? topic, next: topic })
+    opts.push({ id: topic, label: TOPIC_LABELS[topic] ?? topic, next: topic });
   }
   if (unvisited.length === 0) {
-    opts.push(OPEN_PROJECT)
-    opts.push(CONTINUE_PLAYGROUND)
+    opts.push(OPEN_PROJECT);
+    opts.push(CONTINUE_PLAYGROUND);
   }
-  return { question, options: opts }
+  return { question, options: opts };
 }
 
 export const SCRIPT: Record<string, Node> = {
@@ -59,7 +59,7 @@ export const SCRIPT: Record<string, Node> = {
       },
       {
         kind: "text",
-        text: "Every part of this app can be modified and built on top of.",
+        text: "Every part of this app can be extended.",
       },
     ],
     next: ({ visited }) => suggestNext({ visited, current: "intro" }),
@@ -118,4 +118,4 @@ export const SCRIPT: Record<string, Node> = {
       options: [OPEN_PROJECT, CONTINUE_PLAYGROUND],
     }),
   },
-}
+};

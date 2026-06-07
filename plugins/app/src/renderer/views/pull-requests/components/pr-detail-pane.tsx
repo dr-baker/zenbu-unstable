@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRpc } from "@zenbujs/core/react"
-import { Allotment } from "allotment"
 import { FileDiff as DiffsFileDiff } from "@pierre/diffs/react"
 import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs"
 import { Button } from "@zenbu/ui/button"
@@ -51,28 +50,13 @@ export function PrDetailPane({
   const [error, setError] = useState<string | null>(null)
   const [patch, setPatch] = useState<string | null>(null)
   const [patchError, setPatchError] = useState<string | null>(null)
-  // `containerRef` measures the whole detail pane, which decides
-  // between side-by-side and stacked layouts. `diffContainerRef`
-  // measures only the diff pane (whose width differs from the outer
-  // container in side-by-side mode), and drives the split-vs-unified
-  // diff breakpoint.
-  const containerRef = useRef<HTMLDivElement | null>(null)
+  // `diffContainerRef` measures only the diff column (whose width
+  // differs from the outer container in side-by-side mode), and
+  // drives the split-vs-unified diff breakpoint. The side-by-side
+  // vs stacked layout itself is handled purely in CSS via the
+  // `@container` Tailwind utilities on the render tree below.
   const diffContainerRef = useRef<HTMLDivElement | null>(null)
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">("unified")
-  // Threshold where Allotment's two-pane layout actually has room
-  // for *both* columns to be readable. The math:
-  //
-  //   metadata pref (~360px) + separator (~6px) + diff (need >=900)
-  //                                            ≈ 1280px minimum.
-  //
-  // Below that, the diff column ends up too narrow either to fit
-  // typical source lines (truncation) or to flip to split hunks
-  // (which it does at >=920px of its own width). Anything below
-  // this breakpoint, we drop Allotment entirely and stack the two
-  // panes vertically — metadata as a header at the top, diff
-  // taking the full pane width below.
-  const STACK_BREAKPOINT_PX = 1280
-  const [wideEnough, setWideEnough] = useState(true)
   const themeType = useThemeType()
 
   useEffect(() => {
@@ -106,19 +90,6 @@ export function PrDetailPane({
     }
   }, [directory, prNumber, rpc])
 
-  // Outer-width observer — picks the layout (stacked vs split).
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const update = (w: number) => setWideEnough(w >= STACK_BREAKPOINT_PX)
-    update(el.clientWidth)
-    const obs = new ResizeObserver(entries => {
-      for (const e of entries) update(e.contentRect.width)
-    })
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [])
-
   // Diff-pane width observer — picks unified-vs-split *within* the
   // diff pane. Side-by-side diffs need roughly 920px of room to
   // read comfortably; below that we drop to a single column.
@@ -135,10 +106,10 @@ export function PrDetailPane({
     })
     obs.observe(el)
     return () => obs.disconnect()
-    // Re-attach the observer whenever the layout (stacked / split)
-    // changes — the diff scroller re-mounts when we cross the
-    // threshold so the previous DOM node we were observing is gone.
-  }, [wideEnough, pr])
+    // Re-run once the PR loads (the diff column only mounts after
+    // `pr` is set). The node is stable across layout changes now
+    // (CSS-only switch), so no re-attach on a layout breakpoint.
+  }, [pr])
 
   const fileDiffs = useMemo<FileDiffMetadata[]>(() => {
     if (!patch) return []
@@ -291,44 +262,28 @@ export function PrDetailPane({
     </div>
   )
 
+  // Layout responds to the *pane* width via Tailwind container-query
+  // utilities: `@container` on the wrapper, then `@min-[1280px]:`
+  // variants below. Above 1280px there's room for both the metadata
+  // column (~360px) and a readable diff side-by-side, each scrolling
+  // independently; below that the panes stack and the whole view
+  // scrolls as one page (metadata first). The split-vs-unified diff
+  // decision stays in JS — it's a prop on the diff component, which
+  // CSS can't drive — and keys off the diff column's measured width.
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="@container flex h-full min-h-0 flex-col">
       <TopBar number={pr.number} onBack={onBack} url={pr.url} />
 
-      <div ref={containerRef} className="flex min-h-0 flex-1">
-        {wideEnough ? (
-          // Wide layout: side-by-side panes with a draggable
-          // separator. Each pane scrolls independently — long
-          // metadata doesn't push the diff offscreen, long diffs
-          // don't push the metadata offscreen.
-          <Allotment>
-            <Allotment.Pane preferredSize={360} minSize={260}>
-              <div className="h-full min-h-0 overflow-auto">{metadata}</div>
-            </Allotment.Pane>
-            <Allotment.Pane minSize={500}>
-              <div
-                ref={diffContainerRef}
-                className="relative h-full min-h-0 w-full overflow-auto bg-background"
-              >
-                {diffBlock}
-              </div>
-            </Allotment.Pane>
-          </Allotment>
-        ) : (
-          // Narrow layout: stack vertically and let the whole detail
-          // page scroll as one document. Metadata first (badge,
-          // title, commits) so the user gets the "what is this PR"
-          // story before the diff. Allotment is dropped entirely —
-          // a draggable separator inside a narrow pane just gets in
-          // the way.
-          <div
-            ref={diffContainerRef}
-            className="h-full w-full overflow-auto bg-background"
-          >
-            {metadata}
-            <div className="border-t">{diffBlock}</div>
-          </div>
-        )}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto @min-[1280px]:flex-row @min-[1280px]:overflow-hidden">
+        <div className="min-w-0 @min-[1280px]:h-full @min-[1280px]:w-[360px] @min-[1280px]:shrink-0 @min-[1280px]:overflow-y-auto @min-[1280px]:border-r">
+          {metadata}
+        </div>
+        <div
+          ref={diffContainerRef}
+          className="min-w-0 border-t bg-background @min-[1280px]:h-full @min-[1280px]:flex-1 @min-[1280px]:overflow-y-auto @min-[1280px]:border-t-0"
+        >
+          {diffBlock}
+        </div>
       </div>
     </div>
   )

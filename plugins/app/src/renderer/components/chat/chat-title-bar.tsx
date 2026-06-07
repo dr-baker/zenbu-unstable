@@ -1,5 +1,4 @@
 import { useDb } from "@zenbujs/core/react"
-import { useSummary } from "@/hooks/use-summary"
 import { resolveChatLabel } from "@/lib/chat-label"
 import type { Schema } from "../../../main/schema"
 
@@ -26,8 +25,8 @@ const CHAT_TITLE_FADE = 24
 
 /**
  * Slim bar pinned to the top of the chat pane. Shows the chat's
- * resolved label (AI summary → branchSummary → title → fallback)
- * so the user can glance at the pane and know which work they're
+ * resolved label (Pi session name → fallback) so the user can glance
+ * at the pane and know which work they're
  * looking at. When there's a meaningful scope label (worktree branch
  * / directory basename) and it differs from the chat label, it's
  * surfaced as a muted prefix.
@@ -46,7 +45,6 @@ export function ChatTitleBar({
   sessionId,
   hasOverflow,
 }: ChatTitleBarProps) {
-  const aiSummary = useSummary(sessionId)
   const session = useDb(root =>
     sessionId ? root.app.sessions[sessionId] : undefined,
   )
@@ -76,7 +74,7 @@ export function ChatTitleBar({
   })
   const hasWorktreeFanout = workspaceScopeCount > 1
 
-  const { label } = resolveChatLabel(chat, session, aiSummary)
+  const { label } = resolveChatLabel(chat, session)
   const scopeLabel = scope
     ? hasWorktreeFanout
       ? scopeBranchOrBasename(scope, repo ?? null)

@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/settings",
+  "description": "Configure the app and every plugin",
   "version": "0.1.0",
   "private": true,
   "type": "module",

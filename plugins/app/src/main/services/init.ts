@@ -38,7 +38,7 @@ export class InitService extends Service.create({
         height: 540,
         minWidth: 430,
         minHeight: 310,
-        trafficLightPosition: { x: 14, y: 12 },
+        trafficLightPosition: { x: 14, y: 9 },
       },
       contextMenu: { prepend: buildContextMenuPrepend() },
     })

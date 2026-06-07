@@ -19,3 +19,13 @@ export function markOnboardingComplete(): void {
     // localStorage unavailable; tutorial just replays next launch.
   }
 }
+
+/** Clear the completion flag so the tutorial replays. Used by the
+ * "Redo onboarding" action on the post-tutorial panel. */
+export function clearOnboardingComplete(): void {
+  try {
+    localStorage.removeItem(ONBOARDING_DONE_KEY)
+  } catch {
+    // localStorage unavailable; nothing durable to clear.
+  }
+}

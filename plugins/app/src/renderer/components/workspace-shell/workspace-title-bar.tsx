@@ -1,7 +1,6 @@
 import { View } from "@zenbujs/core/react"
 import { TitleBar } from "../layout/title-bar"
 import { TitleBarWorkspace } from "../layout/title-bar-workspace"
-import { CommitButton } from "../title-bar/commit-button"
 import { SidebarToggle } from "../title-bar/sidebar-toggle"
 import { RightSidebarToggle } from "../title-bar/right-sidebar-toggle"
 import { useActiveView, useActiveWorkspaceId } from "@/lib/window-state/active-view"
@@ -25,9 +24,11 @@ import {
  * baked into this file; they're plugin-contributed component
  * views surfaced through `useTitleBarViews()`. Each contribution
  * gets the same `args` shape (workspace, scope, directory) and
- * decides on its own whether to render. `CommitButton` and the
- * sidebar toggles stay host-owned because they're orthogonal to
- * the plugin surface. */
+ * decides on its own whether to render. The sidebar toggles stay
+ * host-owned because they're orthogonal to
+ * the plugin surface. The commit button is no longer host-owned
+ * either — it ships as the `commit-button` plugin and arrives
+ * through the same `title-bar` injection slot as the others. */
 export function WorkspaceTitleBar() {
   const activeView = useActiveView()
   const activeWorkspace = useActiveWorkspace()
@@ -72,7 +73,6 @@ export function WorkspaceTitleBar() {
       right={
         <>
           <TitleBarPluginSlots args={args} />
-          <CommitButton directory={activeScope?.directory ?? null} />
           {sidebarViews.length > 0 && (
             <RightSidebarToggle
               open={isRightBodyOpen}

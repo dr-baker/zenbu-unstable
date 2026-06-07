@@ -129,7 +129,7 @@ export function ChatBackgroundRow() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between @max-[480px]:flex-wrap @max-[480px]:items-start">
         <span className="text-[12px] font-medium text-foreground">
           Chat background
         </span>

@@ -22,7 +22,7 @@ export function ensureWindowState(root: Root, windowId: string): WindowState {
     activeView: { kind: "onboarding" },
     scopePanes: {},
     workspaceActiveScope: {},
-    workspaceRailOpen: false,
+    workspaceRailOpen: true,
     workspaceUiStates: {},
     scopeUiStates: {},
     pluginsView: { selectedPluginName: null, sidebarOpen: true },

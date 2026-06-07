@@ -7,6 +7,6 @@ import { definePlugin } from "@zenbujs/core/config";
  * Disabling the plugin drops live-preview with no host edits.
  */
 export default definePlugin({
-  name: "cmMarkdown",
+  name: "markdown",
   services: ["./src/main/services/*.ts"],
 });

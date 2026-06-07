@@ -93,8 +93,8 @@ export class WorkspacesService extends Service.create({
         workspaceActiveScope: selectedScopeId
           ? { [args.workspaceId]: selectedScopeId }
           : {},
-        // Rail off by default; the user opts in via ⌘⇧B.
-        workspaceRailOpen: false,
+        // Rail on by default; the user toggles via ⌘⇧B.
+        workspaceRailOpen: true,
         workspaceUiStates: {},
         scopeUiStates: {},
         pluginsView: { selectedPluginName: null, sidebarOpen: true },
@@ -335,7 +335,7 @@ function ensureWindowState(
     activeView: { kind: "onboarding" },
     scopePanes: {},
     workspaceActiveScope: {},
-    workspaceRailOpen: false,
+    workspaceRailOpen: true,
     workspaceUiStates: {},
     scopeUiStates: {},
     pluginsView: { selectedPluginName: null, sidebarOpen: true },

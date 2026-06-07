@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/open-projects",
+  "description": "Find any project folder on your machine",
   "version": "0.1.0",
   "private": true,
   "type": "module",

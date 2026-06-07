@@ -49,23 +49,12 @@ export function CloneMarker({
     return null
   })
 
-  // Live label for the parent: mirrors the sidebar's precedence
-  // (sessionMeta.summary → branchSummary → session.title) so the
-  // marker stays in sync if the parent's summary is regenerated
-  // after the fork/clone. Falls back to the stamped `parentTitle`
-  // payload when the parent no longer exists or has no resolvable
-  // label — that snapshot was computed at synthesis time using
-  // the same precedence and gives us a stable last-known label
-  // for deleted parents.
+  // Live label for the parent from Zenbu's cached Pi session name.
+  // Falls back to the stamped `parentTitle` payload when the parent
+  // no longer exists or has no resolvable label.
   const liveParentLabel = useDb(root => {
     if (!parentSessionId) return null
-    const summary = root.app.sessionMeta[parentSessionId]?.summary?.text?.trim()
-    if (summary) return summary
-    const session = root.app.sessions[parentSessionId]
-    if (!session) return null
-    const branchSummary = session.branchSummary?.trim()
-    if (branchSummary) return branchSummary
-    const title = session.title?.trim()
+    const title = root.app.sessions[parentSessionId]?.title?.trim()
     if (title && title !== "Untitled") return title
     return null
   })

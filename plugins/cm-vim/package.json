@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/cm-vim",
+  "description": "Use vim motions inside the agent composer",
   "version": "0.1.0",
   "private": true,
   "type": "module",

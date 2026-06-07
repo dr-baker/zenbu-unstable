@@ -2,6 +2,8 @@ import fs from "node:fs"
 import fsp from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { nativeImage } from "electron"
 import { nanoid } from "nanoid"
 import { Service } from "@zenbujs/core/runtime"
 import { DbService } from "@zenbujs/core/services"
@@ -15,6 +17,130 @@ const PLAYGROUND_DIR_NAME = "zenbu-playground"
 const PLAYGROUND_WORKSPACE_NAME = "Playground"
 /** Matches `DEFAULT_WINDOW_ID` in window-state/window-id.ts. */
 const MAIN_WINDOW_ID = "main"
+/** Filename the app icon is copied to inside the playground folder.
+ * Generic stem so `WorkspaceIconService` would re-discover it too
+ * (see its `STEM_SCORES`). */
+const PLAYGROUND_ICON_NAME = "icon.png"
+
+/** App icon location relative to the Zenbu source root. Ships in
+ * production builds via the per-plugin `assets` include glob. */
+const APP_ICON_RELATIVE = path.join("plugins", "app", "assets", "icon.png")
+
+/**
+ * Walk up from `start` looking for the directory that actually
+ * contains the app icon at `plugins/app/assets/icon.png`.
+ *
+ * This is self-validating: instead of trusting a marker file that
+ * may or may not ship (the root `AGENTS.md` is *not* in production
+ * builds, which is why the playground icon silently failed there),
+ * we look for the icon itself. Returns the absolute icon path, or
+ * `null` if nothing matched on the way up.
+ */
+function walkUpForIcon(start: string): string | null {
+  let current = path.resolve(start)
+  for (;;) {
+    const candidate = path.join(current, APP_ICON_RELATIVE)
+    if (fs.existsSync(candidate)) return candidate
+    const parent = path.dirname(current)
+    if (parent === current) return null
+    current = parent
+  }
+}
+
+/**
+ * Resolve the absolute path of the app icon shipped with this
+ * build. This is "the weird app where the source is on disk", so
+ * the icon is reachable from the running main-process module:
+ *
+ *   1. `ZENBU_SOURCE_DIR` env override.
+ *   2. Walk up from this compiled module's directory looking for
+ *      the icon itself at the known sub-path. Self-validating, so
+ *      it doesn't depend on a marker file that may not ship in
+ *      production (the root `AGENTS.md` is excluded from builds).
+ *
+ * Returns `null` if nothing resolves (we then just leave the
+ * playground on its letter tile).
+ */
+function resolveAppIconPath(): string | null {
+  const fromEnv = process.env.ZENBU_SOURCE_DIR?.trim()
+  if (fromEnv) {
+    const candidate = path.join(path.resolve(fromEnv), APP_ICON_RELATIVE)
+    if (fs.existsSync(candidate)) return candidate
+  }
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url))
+    const icon = walkUpForIcon(here)
+    if (icon) return icon
+  } catch {
+    // import.meta.url not a file URL (unusual bundling) — give up.
+  }
+  return null
+}
+
+/** Alpha below this counts as "empty" when finding content bounds. */
+const ICON_ALPHA_THRESHOLD = 8
+/** Skip trimming if the content already fills this fraction of the
+ * canvas in both axes — nothing meaningful to crop. */
+const ICON_FILL_SKIP_RATIO = 0.98
+
+/**
+ * Trim the fully-transparent margin off a PNG so the mark fills the
+ * frame instead of floating inside the app icon's safe-area padding
+ * (which is why it rendered tiny in the rail).
+ *
+ * Purely in-memory: takes the source bytes, returns new PNG bytes.
+ * It never reads or writes the source file, so the true app icon on
+ * disk is never mutated. Returns the input bytes unchanged on any
+ * failure or when there's nothing worth cropping.
+ */
+function trimTransparentMargin(srcBytes: Buffer): Buffer {
+  try {
+    const img = nativeImage.createFromBuffer(srcBytes)
+    const { width, height } = img.getSize()
+    if (!width || !height) return srcBytes
+    // BGRA, row-major; 4 bytes per pixel.
+    const bmp = img.toBitmap()
+    if (bmp.length < width * height * 4) return srcBytes
+
+    let minX = width
+    let minY = height
+    let maxX = -1
+    let maxY = -1
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const alpha = bmp[(y * width + x) * 4 + 3]
+        if (alpha > ICON_ALPHA_THRESHOLD) {
+          if (x < minX) minX = x
+          if (x > maxX) maxX = x
+          if (y < minY) minY = y
+          if (y > maxY) maxY = y
+        }
+      }
+    }
+    // Fully transparent — nothing to do.
+    if (maxX < minX || maxY < minY) return srcBytes
+
+    const cropW = maxX - minX + 1
+    const cropH = maxY - minY + 1
+    if (
+      cropW >= width * ICON_FILL_SKIP_RATIO &&
+      cropH >= height * ICON_FILL_SKIP_RATIO
+    ) {
+      return srcBytes
+    }
+
+    const cropped = img.crop({
+      x: minX,
+      y: minY,
+      width: cropW,
+      height: cropH,
+    })
+    const out = cropped.toPNG()
+    return out.length > 0 ? Buffer.from(out) : srcBytes
+  } catch {
+    return srcBytes
+  }
+}
 
 /**
  * Seeds the auto-created "Playground" workspace on a fresh DB:
@@ -37,6 +163,12 @@ export class PlaygroundService extends Service.create({
       // Re-create the folder if the user deleted it on disk, then
       // make sure the first window still lands on the playground.
       await this.ensureExistingPlaygroundOnDisk(existing.id)
+      // Backfill the app icon onto playgrounds created before this
+      // shipped (they're sitting on the "P" letter tile).
+      const scope = Object.values(
+        this.ctx.db.client.readRoot().app.scopes,
+      ).find(s => s.workspaceId === existing.id && !s.archived)
+      if (scope) await this.ensurePlaygroundIcon(existing.id, scope.directory)
       await this.pointMainWindowAtPlayground(existing.id)
       return
     }
@@ -122,7 +254,99 @@ export class PlaygroundService extends Service.create({
       ws.scopePanes[scopeId] = paneState
     })
 
+    // Copy the app icon into the folder and set it as the
+    // workspace icon so the rail shows the Zenbu mark instead of
+    // the "P" letter tile.
+    await this.ensurePlaygroundIcon(workspaceId, directory)
+
     await this.gitInitIfAvailable(directory)
+  }
+
+  /**
+   * Give the playground the app icon, two ways at once (per the
+   * design notes): copy the icon file into the project folder
+   * *and* set it as the workspace's auto icon so the rail updates
+   * immediately without waiting on a discovery walk.
+   *
+   * Idempotent and best-effort: never clobbers an existing
+   * in-folder icon or an icon the user already chose, and silently
+   * gives up if the source icon can't be resolved/read.
+   */
+  private async ensurePlaygroundIcon(
+    workspaceId: string,
+    directory: string,
+  ): Promise<void> {
+    const source = resolveAppIconPath()
+    if (!source) return
+
+    // Read the source bytes once and trim the transparent safe-area
+    // margin *in memory*. The source file is only ever read here —
+    // never written — so the true app icon on disk is untouched.
+    let bytes: Buffer
+    try {
+      bytes = trimTransparentMargin(await fsp.readFile(source))
+    } catch (err) {
+      console.warn("[playground] failed to read app icon:", err)
+      return
+    }
+
+    // 1. Drop the trimmed icon into the project folder (a separate
+    //    file from the source asset). `wx` so we never clobber a
+    //    real icon the user dropped in.
+    const dest = path.join(directory, PLAYGROUND_ICON_NAME)
+    try {
+      await fsp.writeFile(dest, bytes, { flag: "wx" })
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException
+      if (e?.code !== "EEXIST") {
+        console.warn("[playground] failed to write app icon:", err)
+      }
+    }
+
+    // 2. Set it as the workspace's auto icon. A user upload always
+    //    wins, so bail if one exists. Otherwise (re)derive ours —
+    //    this also upgrades a previously-stored untrimmed icon.
+    const ws = this.ctx.db.client.readRoot().app.workspaces[workspaceId]
+    if (!ws || ws.icon) return
+
+    // Already up to date? Compare against the current auto blob so
+    // we don't churn a new blob on every boot.
+    const prevBlobId = ws.iconAuto?.blobId ?? null
+    if (prevBlobId) {
+      try {
+        const existing = await this.ctx.db.client.getBlobData(prevBlobId)
+        if (existing && Buffer.from(existing as Uint8Array).equals(bytes)) {
+          return
+        }
+      } catch {
+        // Can't read the old blob — fall through and replace it.
+      }
+    }
+
+    const blobId = await this.ctx.db.client.createBlob(
+      new Uint8Array(bytes),
+      true,
+    )
+    await this.ctx.db.client.update(root => {
+      const w = root.app.workspaces[workspaceId]
+      if (!w) return
+      // A user uploaded an icon while we worked — keep theirs.
+      if (w.icon) {
+        void this.ctx.db.client.deleteBlob(blobId).catch(() => {})
+        return
+      }
+      w.iconAuto = {
+        blobId,
+        mimeType: "image/png",
+        sourcePath: PLAYGROUND_ICON_NAME,
+        discoveredAt: Date.now(),
+      }
+      w.iconAutoAttempted = true
+    })
+    // Drop the superseded blob now that the new one is referenced.
+    if (prevBlobId && prevBlobId !== blobId) {
+      void this.ctx.db.client.deleteBlob(prevBlobId).catch(() => {})
+    }
   }
 
   /**
@@ -321,7 +545,7 @@ function ensureWindowState(
     activeView: { kind: "onboarding" },
     scopePanes: {},
     workspaceActiveScope: {},
-    workspaceRailOpen: false,
+    workspaceRailOpen: true,
     workspaceUiStates: {},
     scopeUiStates: {},
     pluginsView: { selectedPluginName: null, sidebarOpen: true },

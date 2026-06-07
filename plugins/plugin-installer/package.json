@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/plugin-installer",
+  "description": "Add plugins from a URL or folder",
   "version": "0.1.0",
   "private": true,
   "type": "module",

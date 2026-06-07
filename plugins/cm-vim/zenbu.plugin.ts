@@ -31,7 +31,7 @@ import { definePlugin } from "@zenbujs/core/config";
  * (for the vim-mode toggle).
  */
 export default definePlugin({
-  name: "cmVim",
+  name: "vim",
   services: ["./src/main/services/*.ts"],
   dependsOn: [{ name: "app", from: "../../zenbu.config.ts" }],
 });

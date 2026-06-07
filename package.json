@@ -1,6 +1,6 @@
 {
-  "name": "zenbu",
-  "version": "0.0.10",
+  "name": "zenbu-unstable",
+  "version": "0.0.5",
   "private": true,
   "type": "module",
   "main": "node_modules/@zenbujs/core/dist/setup-gate.mjs",
@@ -15,11 +15,10 @@
     "lint": "eslint .",
     "ci": "pnpm run typecheck && pnpm run lint",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "release:signed": "bash scripts/release-signed.sh"
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "@zenbujs/core": "0.4.2"
+    "@zenbujs/core": "0.4.4"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -36,7 +35,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git@github.com:zenbu-labs/zenbu-release.git"
+    "url": "git@github.com:dr-baker/zenbu-unstable.git"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

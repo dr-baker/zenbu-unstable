@@ -229,7 +229,7 @@ export function PluginsPanel() {
         }
         className="h-8 text-[12px]"
       />
-      <div className="flex min-h-0 flex-1 gap-3">
+      <div className="flex min-h-0 flex-1 gap-3 @max-[760px]:flex-col @max-[760px]:gap-2">
         <SectionsSidebar
           sections={orderedSections}
           activeSectionId={activeSectionId}
@@ -280,7 +280,7 @@ function SectionsSidebar({
 }) {
 
   return (
-    <nav className="flex w-[220px] shrink-0 flex-col gap-0.5 overflow-y-auto pr-1">
+    <nav className="flex w-[220px] shrink-0 flex-col gap-0.5 overflow-y-auto pr-1 @max-[760px]:w-full @max-[760px]:flex-row @max-[760px]:gap-1 @max-[760px]:overflow-x-auto @max-[760px]:overflow-y-hidden @max-[760px]:pr-0 @max-[760px]:pb-1">
       {sections.map((section) => {
         const isActive = section.id === activeSectionId;
         const matchCount = matchCountBySection?.get(section.id);
@@ -290,7 +290,7 @@ function SectionsSidebar({
             type="button"
             onClick={() => onSelect(section.id)}
             className={cn(
-              "flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px]",
+              "flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] @max-[760px]:shrink-0",
               isActive
                 ? "bg-accent text-accent-foreground"
                 : "text-foreground hover:bg-accent/50",
@@ -407,7 +407,7 @@ function ItemRow({
 }) {
   const dispatch = useDispatchControl(item);
   return (
-    <div className="flex items-start gap-4 p-3">
+    <div className="flex items-start gap-4 p-3 @max-[480px]:flex-col @max-[480px]:items-stretch @max-[480px]:gap-2">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-[13px] font-medium text-foreground">
@@ -425,7 +425,7 @@ function ItemRow({
           </p>
         ) : null}
       </div>
-      <div className="flex shrink-0 items-center">
+      <div className="flex shrink-0 items-center @max-[480px]:items-stretch">
         <ItemControl item={item} dispatch={dispatch} />
       </div>
     </div>

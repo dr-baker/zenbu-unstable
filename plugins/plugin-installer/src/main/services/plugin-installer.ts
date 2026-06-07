@@ -2,6 +2,8 @@ import fs from "node:fs"
 import fsp from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { spawnWithInstallHangGuard } from "@zenbujs/core/install-guard"
 import { Service } from "@zenbujs/core/runtime"
 import { RpcService } from "@zenbujs/core/services"
@@ -26,6 +28,7 @@ const INTERNAL_PATHS_JSON = path.join(
   ".internal",
   "paths.json",
 )
+const execFileP = promisify(execFile)
 
 export class PluginInstallerService extends Service.create({
   key: "pluginInstaller",
@@ -79,7 +82,12 @@ export class PluginInstallerService extends Service.create({
    * clone fails — we always clean up a half-created plugin
    * directory on error so the next attempt starts from scratch.
    */
-  async install(args: { url: string }): Promise<{
+  async install(args: {
+    url: string
+    name?: string
+    commitSha?: string
+    ref?: string
+  }): Promise<{
     ok: true
     name: string
     path: string
@@ -87,8 +95,23 @@ export class PluginInstallerService extends Service.create({
     const url = args.url.trim()
     if (!url) throw new Error("Empty URL.")
 
-    const name = derivePluginName(url)
+    const ref = args.ref?.trim() || undefined
+    if (ref && !/^[A-Za-z0-9._/-]+$/.test(ref)) {
+      throw new Error(`Invalid git ref "${ref}".`)
+    }
+
+    const explicitName =
+      args.name === undefined ? undefined : args.name.trim()
+    const name =
+      explicitName === undefined ? derivePluginName(url) : explicitName
     if (!name) throw new Error(`Could not derive a plugin name from "${url}".`)
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+      throw new Error(`Invalid plugin name "${name}".`)
+    }
+    const commitSha = args.commitSha?.trim()
+    if (commitSha && !/^[0-9a-f]{7,64}$/i.test(commitSha)) {
+      throw new Error(`Invalid commit SHA "${commitSha}".`)
+    }
 
     const dest = path.join(PLUGINS_HOME, name)
     const cleanupOnError = async () => {
@@ -109,7 +132,22 @@ export class PluginInstallerService extends Service.create({
       }
 
       this.emit("clone", `Cloning ${url}…`)
-      await this.run("git", ["clone", "--depth", "1", url, dest])
+      // Marketplace installs pass `ref` ("released") so the clone tracks the
+      // published branch instead of the author's `main` tip. The host's git
+      // updater then fast-forwards that same branch on later update checks.
+      const cloneArgs = ["clone", "--depth", "1"]
+      if (ref) cloneArgs.push("--branch", ref)
+      cloneArgs.push(url, dest)
+      await this.run("git", cloneArgs)
+      if (commitSha) {
+        this.emit("clone", `Verifying approved commit ${commitSha}…`)
+        const head = await gitStdout(dest, ["rev-parse", "HEAD"])
+        if (!commitMatches(head, commitSha)) {
+          throw new Error(
+            `Marketplace approved commit ${commitSha} does not match cloned HEAD ${head}.`,
+          )
+        }
+      }
 
       const manifest = path.join(dest, "zenbu.plugin.ts")
       const manifestJs = path.join(dest, "zenbu.plugin.js")
@@ -174,6 +212,23 @@ export class PluginInstallerService extends Service.create({
     })
   }
 }
+async function gitStdout(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileP("git", args, {
+    cwd,
+    maxBuffer: 1024 * 1024,
+  })
+  return stdout.trim()
+}
+
+function commitMatches(head: string, expected: string): boolean {
+  const normalizedHead = head.trim().toLowerCase()
+  const normalizedExpected = expected.trim().toLowerCase()
+  return (
+    normalizedHead === normalizedExpected ||
+    normalizedHead.startsWith(normalizedExpected)
+  )
+}
+
 /* The local-config patch helpers moved to ../lib/patch-local-plugins.ts.
    This service imports them so the on-disk format stays consistent
    with the rest of the JSONC manifest tooling. */

@@ -266,7 +266,7 @@ export class ShortcutsService_App extends Service.create({
         category: "Navigation",
         description:
           "Move keyboard focus to the agent sidebar so j/k/space etc. start firing.",
-        defaultBinding: mod({ key: "0" }),
+        defaultBinding: mod({ key: "s", shift: true }),
         method: "focusSidebar",
       },
       {

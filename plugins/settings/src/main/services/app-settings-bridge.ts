@@ -132,7 +132,7 @@ export class AppSettingsBridgeService extends Service.create({
         sectionId: SECTION_ID,
         label: "Disable anonymous telemetry",
         description:
-          "Stops the app from sending anonymous product analytics.",
+          "Stops the app from sending anonymous product.",
         group: "Privacy",
         order: 0,
         keywords: [

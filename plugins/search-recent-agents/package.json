@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/search-recent-agents",
+  "description": "Jump back into a past chat",
   "version": "0.1.0",
   "private": true,
   "type": "module",

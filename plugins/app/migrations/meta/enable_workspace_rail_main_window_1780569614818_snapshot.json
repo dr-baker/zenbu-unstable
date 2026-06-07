@@ -1,0 +1,159 @@
+{
+  "id": "8d64c035-fab6-4493-a876-8bb8699084ee",
+  "prevId": "c4f39787-002c-478d-8a85-1964791195c6",
+  "fields": {
+    "repos": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "abc6daf49c0fb814",
+      "default": {}
+    },
+    "workspaces": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "d2ea7ae579fed4ec",
+      "default": {}
+    },
+    "scopes": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "3f50bf2c5502b79a",
+      "default": {}
+    },
+    "chats": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "e274c6a653a1d416",
+      "default": {}
+    },
+    "sessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "aa18db08fe4063bc",
+      "default": {}
+    },
+    "windowStates": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "a3bcc97591c76fec",
+      "default": {}
+    },
+    "chatStates": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "1435d8954a9470c5",
+      "default": {}
+    },
+    "terminals": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "f6cee4787dd01d49",
+      "default": {}
+    },
+    "fileTreeIndexes": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "43aae2a54f4955bb",
+      "default": {}
+    },
+    "models": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "389f9537591154c4",
+      "default": {}
+    },
+    "sessionMeta": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "52998134722c6aa1",
+      "default": {}
+    },
+    "killedSessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "66cebe4d7ce03cd7",
+      "default": {}
+    },
+    "pendingReloadToasts": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "8cd6790799910376",
+      "default": {}
+    },
+    "chatWindows": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "f95e82b83f93bd6a",
+      "default": {}
+    },
+    "piExtensions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "60d3727986700ee2",
+      "default": {}
+    },
+    "paletteActions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "2910182cd0aa9e8a",
+      "default": {}
+    },
+    "slashCommands": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "eff3b1903b285471",
+      "default": {}
+    },
+    "recentProjects": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "78467fab863fcfdb",
+      "default": {}
+    },
+    "plugins": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "1bdd1b5849aa6bc0",
+      "default": []
+    },
+    "pluginIcons": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "dca193d69e9fe4dd",
+      "default": {}
+    },
+    "providerStatuses": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "1bd52280e6584c5f",
+      "default": {}
+    },
+    "oauthFlow": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "b6c1ab19889b0d34",
+      "default": null
+    },
+    "env": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "5aa7b30ea8cde207",
+      "default": {
+        "homeDir": null
+      }
+    },
+    "settings": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "71145a5536a1129c",
+      "default": {
+        "theme": "system",
+        "chatBackground": null,
+        "vimMode": true,
+        "defaultSendMode": "followUp",
+        "chatDevtools": false,
+        "disableTelemetry": false
+      }
+    }
+  }
+}

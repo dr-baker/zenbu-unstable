@@ -1,0 +1,12 @@
+{
+  "id": "819174aa-d5ad-4f2c-bfab-9407de8aabe1",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "fields": {
+    "enabled": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "8c885966023f36f6",
+      "default": false
+    }
+  }
+}

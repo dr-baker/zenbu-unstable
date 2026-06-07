@@ -1,0 +1,22 @@
+{
+  "id": "304b7d39-fd77-4301-9b4f-1d374fc2bdb0",
+  "prevId": "578c5e52-2640-4608-a8b8-92cd59f719cb",
+  "fields": {
+    "enabled": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "8c885966023f36f6",
+      "default": false
+    },
+    "catalog": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "6ea5a0f601089e11",
+      "default": {}
+    },
+    "feed": {
+      "kind": "collection",
+      "debugName": "marketplace-feed"
+    }
+  }
+}

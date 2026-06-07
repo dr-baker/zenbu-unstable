@@ -268,6 +268,8 @@ export function ChatPane({
         id: `registered:${cmd.id}`,
         label: cmd.label,
         description: cmd.description ?? undefined,
+        group: cmd.group ?? undefined,
+        hint: cmd.hint ?? cmd.source ?? undefined,
         action: cmd.insertOnSelect ? undefined : `registered:${cmd.id}`,
         insertText: cmd.insertOnSelect ? `/${cmd.name} ` : undefined,
       }))
@@ -1103,7 +1105,6 @@ export function ChatPane({
               <WorktreeHandoffSelector
                 chatId={chat.id}
                 sourceScopeId={chat.scopeId}
-                windowId={windowId}
                 onCancel={() => setTreePanel({ kind: "closed" })}
                 onClose={() => setTreePanel({ kind: "closed" })}
                 onConflictHandedToComposer={() =>

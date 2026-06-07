@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/cm-image-paste",
+  "description": "Paste inline screenshots into the agent composer",
   "version": "0.1.0",
   "private": true,
   "type": "module",

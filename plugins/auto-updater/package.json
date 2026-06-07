@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/auto-updater",
+  "description": "Keep the app on the latest version",
   "version": "0.1.0",
   "private": true,
   "type": "module",

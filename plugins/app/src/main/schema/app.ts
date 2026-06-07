@@ -20,12 +20,23 @@ import { z } from "@zenbujs/core/db";
  *    `plugins/` tree; `"pi"` means it's a pi-agent extension
  *    discovered under `~/.pi/agent/extensions`; `null` means it's
  *    an ordinary installed zenbu plugin (no chip).
+ *  - `enabled`: whether the plugin is loaded. Disabled plugins stay
+ *    in the list (with their icon) so the UI can show them as off.
+ *  - `description` / `author` / `version`: from the plugin's
+ *    `package.json` at index time; `null` if absent.
+ *  - `pluginFile`: manifest entry path used to enable/disable/remove;
+ *    `null` for core plugins and pi extensions.
  */
 export const pluginListing = z.object({
   name: z.string(),
   dir: z.string(),
   kind: z.enum(["plugin", "pi-extension"]).default("plugin"),
   tag: z.enum(["core", "pi"]).nullable().default(null),
+  enabled: z.boolean().default(true),
+  description: z.string().nullable().default(null),
+  author: z.string().nullable().default(null),
+  version: z.string().nullable().default(null),
+  pluginFile: z.string().nullable().default(null),
 });
 
 /**
@@ -90,23 +101,6 @@ export const recentProject = z.object({
 // re-register from their own `setup()` blocks, so removed plugins
 // never leave dangling entries.
 // ---------------------------------------------------------------------------
-
-/**
- * A Pi extension contributed by a zenbu plugin. `path` is an
- * absolute filesystem path to the extension's entry `.ts` file;
- * `SessionsService` feeds these into
- * `DefaultResourceLoader.additionalExtensionPaths`.
- */
-export const piExtension = z.object({
-  id: z.string(),
-  path: z.string(),
-  meta: z
-    .object({
-      label: z.string().optional(),
-      pluginName: z.string().optional(),
-    })
-    .default({}),
-});
 
 /**
  * A command palette action contributed by a plugin.

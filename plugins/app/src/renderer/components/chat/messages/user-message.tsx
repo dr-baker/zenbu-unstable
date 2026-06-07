@@ -85,8 +85,12 @@ type Stage =
    * Held briefly so the picker can show a "Working\u2026" indicator
    * before the bubble re-renders (or, in the edit case, before the
    * session rebuilds and this materialized message goes away).
-   * `flow` keeps the action-label stable across the transition. */
-  | { kind: "busy"; flow: "edit" | "revert" }
+   * `flow` keeps the action-label stable across the transition.
+   * For the edit flow we also carry the just-edited `displayText`
+   * so the preview bubble keeps showing the new message (not the
+   * original `content` prop) while the summary work runs. */
+  | { kind: "busy"; flow: "edit"; displayText: string }
+  | { kind: "busy"; flow: "revert" }
 
 export function UserMessage({
   content,
@@ -223,7 +227,7 @@ export function UserMessage({
     if (stage.kind !== "editChoosing") return
     if (userMessageIndex == null || !onEditSubmit) return
     const { text, displayText } = stage
-    setStage({ kind: "busy", flow: "edit" })
+    setStage({ kind: "busy", flow: "edit", displayText })
     try {
       await onEditSubmit({ userMessageIndex, text, displayText, choice })
     } finally {
@@ -281,11 +285,27 @@ export function UserMessage({
   const showCollapseFooter =
     expanded && !editing && !showingPicker && !busy && overflows
 
+  // While the summary picker (or its busy follow-up) is up after an
+  // edit, the read-only preview bubble should reflect the text the
+  // user just typed — not the original `content` prop, which hasn't
+  // been replaced yet because the session only rebuilds once a
+  // summary choice is confirmed. Without this the bubble shows the
+  // *previous* message above the picker. The revert flow has no
+  // edited text, so it falls back to `content`.
+  const previewContent =
+    stage.kind === "editChoosing"
+      ? stage.displayText
+      : stage.kind === "busy" && stage.flow === "edit"
+        ? stage.displayText
+        : content
+
   // React `key` on Composer forces a full unmount/remount when we
   // flip in/out of edit mode. The Composer reads `readOnly` once at
   // mount (it's baked into the CodeMirror extension set) so a prop
-  // change alone wouldn't rebuild the editor.
-  const composerInstanceKey = `user-msg-${editing ? "edit" : "view"}-${content.length}-${content.slice(0, 32)}`
+  // change alone wouldn't rebuild the editor. Keying on
+  // `previewContent` (not `content`) also remounts the read-only
+  // bubble when we swap in the edited text for the picker preview.
+  const composerInstanceKey = `user-msg-${editing ? "edit" : "view"}-${previewContent.length}-${previewContent.slice(0, 32)}`
 
   return (
     <div className="group/msg py-1">
@@ -320,7 +340,11 @@ export function UserMessage({
               // inherits the bubble's `bg-accent` instead of stamping
               // a `bg-card` rectangle on top of it.
               embedded
-              initialText={content}
+              // `previewContent` is the original `content` except
+              // while the post-edit picker is up, when it's the
+              // just-edited text so the preview matches what's about
+              // to be sent.
+              initialText={editing ? content : previewContent}
               files={files}
               placeholder="Edit and press Enter \u2192 pick summary"
               onSubmit={editing ? handleComposerSubmit : NOOP_SUBMIT}

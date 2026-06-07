@@ -1,0 +1,18 @@
+{
+  "id": "578c5e52-2640-4608-a8b8-92cd59f719cb",
+  "prevId": "a82cf702-3b5a-4a2b-9927-b885eede9617",
+  "fields": {
+    "enabled": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "8c885966023f36f6",
+      "default": false
+    },
+    "catalog": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "6ea5a0f601089e11",
+      "default": {}
+    }
+  }
+}

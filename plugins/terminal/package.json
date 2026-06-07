@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/terminal",
+  "description": "Embed a terminal in your bottom panel",
   "version": "0.1.0",
   "private": true,
   "type": "module",

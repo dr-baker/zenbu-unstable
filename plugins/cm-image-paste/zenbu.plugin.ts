@@ -23,7 +23,7 @@ import { definePlugin } from "@zenbujs/core/config";
  * Depends on `app` for the shared image-cache module.
  */
 export default definePlugin({
-  name: "cmImagePaste",
+  name: "imagePaste",
   services: ["./src/main/services/*.ts"],
   dependsOn: [{ name: "app", from: "../../zenbu.config.ts" }],
 });

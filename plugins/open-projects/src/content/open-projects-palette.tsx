@@ -15,7 +15,9 @@ import {
   useRpc,
   ZenbuProvider,
 } from "@zenbujs/core/react"
+import { Plus } from "lucide-react"
 import { Input } from "@zenbu/ui/input"
+import { Button } from "@zenbu/ui/button"
 import { PaletteShell, PaletteRow } from "@zenbu/ui/palette"
 import { useWindowId } from "@/lib/window-state/window-id"
 
@@ -49,6 +51,17 @@ type ProjectEntry = {
   parent: string
   depth: number
   marker: string
+}
+
+/**
+ * Sanitize the project-name field as the user types, mirroring the
+ * onboarding screen: collapse runs of whitespace to a single hyphen
+ * (the conventional directory separator) and collapse adjacent
+ * dashes so a fast-typed "my  cool   app" doesn't become
+ * `my--cool---app`.
+ */
+function normalizeProjectName(raw: string): string {
+  return raw.replace(/\s+/g, "-").replace(/-{2,}/g, "-")
 }
 
 /** How many rows we render on the first cut, and how many we add
@@ -121,6 +134,10 @@ function OpenProjectsPaletteBody({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState(0)
   const [windowSize, setWindowSize] = useState(INITIAL_WINDOW)
+  // When the user activates the pinned "Create project" row the
+  // palette flips into the new-project form (same flow as the
+  // onboarding screen). `null` = the normal fuzzy list.
+  const [mode, setMode] = useState<"list" | "new">("list")
   const inputRef = useRef<HTMLInputElement>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
   // Ref the *currently-selected* row threads onto. Plain ref
@@ -153,15 +170,20 @@ function OpenProjectsPaletteBody({ onClose }: { onClose: () => void }) {
   // Reset the visible window + selection whenever the query
   // changes. The user's intent on typing is "show me the top
   // matches from the start", not "keep my scroll position".
+  // Default to the first project (selection index 1) so Enter
+  // opens the top match, same as before the pinned create row
+  // existed; the clamp effect below falls back to the create row
+  // (index 0) when there are no projects.
   useEffect(() => {
     setWindowSize(INITIAL_WINDOW)
-    setSelected(0)
+    setSelected(1)
   }, [query])
 
   // Clamp selection if the filtered list got shorter than where
-  // we were sitting.
+  // we were sitting. Valid range is 0 (create row) .. filtered.length
+  // (last project lives at index filtered.length).
   useEffect(() => {
-    if (selected >= filtered.length && filtered.length > 0) {
+    if (selected > filtered.length) {
       setSelected(0)
     }
   }, [filtered.length, selected])
@@ -172,8 +194,11 @@ function OpenProjectsPaletteBody({ onClose }: { onClose: () => void }) {
   // that happens we extend the window enough to render up to the
   // selected row + a small buffer.
   useEffect(() => {
-    if (selected >= windowSize) {
-      const needed = selected + 1
+    // `selected` includes the pinned create row at index 0, so the
+    // project-list index is `selected - 1`.
+    const projectIdx = selected - 1
+    if (projectIdx >= windowSize) {
+      const needed = projectIdx + 1
       setWindowSize(prev =>
         prev >= needed
           ? prev
@@ -230,6 +255,10 @@ function OpenProjectsPaletteBody({ onClose }: { onClose: () => void }) {
     [hover],
   )
 
+  // Total navigable rows = the pinned "Create project" row (index
+  // 0, always present) + the filtered project list. Project entry
+  // `i` lives at selection index `i + 1`.
+  const CREATE_ROW_INDEX = 0
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -237,32 +266,37 @@ function OpenProjectsPaletteBody({ onClose }: { onClose: () => void }) {
         onClose()
         return
       }
-      const len = filtered.length
+      // 1 extra for the pinned create row.
+      const len = filtered.length + 1
       const plainCtrl =
         e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey
       if (e.key === "ArrowDown" || (plainCtrl && (e.key === "n" || e.key === "N"))) {
         e.preventDefault()
-        if (len > 0) setSelectedFromKeyboard(s => (s + 1) % len)
+        setSelectedFromKeyboard(s => (s + 1) % len)
         return
       }
       if (e.key === "ArrowUp" || (plainCtrl && (e.key === "p" || e.key === "P"))) {
         e.preventDefault()
-        if (len > 0) setSelectedFromKeyboard(s => (s - 1 + len) % len)
+        setSelectedFromKeyboard(s => (s - 1 + len) % len)
         return
       }
       if (plainCtrl && (e.key === "d" || e.key === "D")) {
         e.preventDefault()
-        if (len > 0) setSelectedFromKeyboard(s => Math.min(len - 1, s + 8))
+        setSelectedFromKeyboard(s => Math.min(len - 1, s + 8))
         return
       }
       if (plainCtrl && (e.key === "u" || e.key === "U")) {
         e.preventDefault()
-        if (len > 0) setSelectedFromKeyboard(s => Math.max(0, s - 8))
+        setSelectedFromKeyboard(s => Math.max(0, s - 8))
         return
       }
       if (e.key === "Enter") {
         e.preventDefault()
-        const item = filtered[selected]
+        if (selected === CREATE_ROW_INDEX) {
+          setMode("new")
+          return
+        }
+        const item = filtered[selected - 1]
         if (item) void activate(item)
       }
     },
@@ -284,6 +318,34 @@ function OpenProjectsPaletteBody({ onClose }: { onClose: () => void }) {
     },
     [rpc, windowId, onClose],
   )
+
+  // ---- new-project form -----------------------------------------
+  // Same flow as the onboarding screen: create an empty folder via
+  // `repos.createEmptyProject`, then open it as a workspace.
+  if (mode === "new") {
+    return (
+      <NewProjectForm
+        onCancel={() => setMode("list")}
+        onCreate={async relative => {
+          const result = await rpc.app.repos.createEmptyProject({
+            relativePath: "~/" + relative,
+          })
+          if (!result.ok) return result.error
+          onClose()
+          try {
+            await rpc.app.workspaces.createFromDirectory({
+              directory: result.directory,
+              windowId,
+            })
+          } catch {
+            // Swallow — the folder was created; a failed open just
+            // leaves the user where they were.
+          }
+          return null
+        }}
+      />
+    )
+  }
 
   return (
     <PaletteShell
@@ -314,18 +376,34 @@ function OpenProjectsPaletteBody({ onClose }: { onClose: () => void }) {
           * blank rectangle inside the fixed-height scroller. The
           * input above is the only thing the user needs to see
           * when there are zero results. */}
-        {visible.map((entry, i) => (
-          <ProjectPaletteRow
-            key={entry.path}
-            entry={entry}
-            isSelected={i === selected}
-            rowRef={i === selected ? selectedRowRef : noopRef}
-            onMouseMove={() => {
-              if (hover.isActive()) setSelected(i)
-            }}
-            onActivate={() => void activate(entry)}
-          />
-        ))}
+        {/* Pinned first row — always present so there's always a
+          * way to create a project, even when the index is empty,
+          * still loading, or has no matches for the query. */}
+        <CreateProjectRow
+          isSelected={selected === CREATE_ROW_INDEX}
+          rowRef={selected === CREATE_ROW_INDEX ? selectedRowRef : noopRef}
+          onMouseMove={() => {
+            if (hover.isActive()) setSelected(CREATE_ROW_INDEX)
+          }}
+          onActivate={() => setMode("new")}
+        />
+        {visible.map((entry, i) => {
+          // Project entry `i` occupies selection index `i + 1`
+          // (the create row is index 0).
+          const idx = i + 1
+          return (
+            <ProjectPaletteRow
+              key={entry.path}
+              entry={entry}
+              isSelected={idx === selected}
+              rowRef={idx === selected ? selectedRowRef : noopRef}
+              onMouseMove={() => {
+                if (hover.isActive()) setSelected(idx)
+              }}
+              onActivate={() => void activate(entry)}
+            />
+          )
+        })}
       </div>
     </PaletteShell>
   )
@@ -358,6 +436,186 @@ function ProjectPaletteRow({
         </span>
       </span>
     </PaletteRow>
+  )
+}
+
+function CreateProjectRow({
+  isSelected,
+  rowRef,
+  onMouseMove,
+  onActivate,
+}: {
+  isSelected: boolean
+  rowRef: React.Ref<HTMLButtonElement>
+  onMouseMove: () => void
+  onActivate: () => void
+}) {
+  return (
+    <PaletteRow
+      isSelected={isSelected}
+      rowRef={rowRef}
+      onMouseMove={onMouseMove}
+      onActivate={onActivate}
+    >
+      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className="truncate text-popover-foreground">Create project</span>
+        <Plus
+          className="h-[14px] w-[14px] shrink-0 text-muted-foreground"
+          strokeWidth={1.75}
+        />
+      </span>
+    </PaletteRow>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              New project form                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * In-palette new-project form. Mirrors the onboarding screen's
+ * "New project" step: a single name field (mapped to the last path
+ * segment) with an "Advanced" disclosure for the parent folder
+ * (defaults to `~/projects`). `onCreate` returns an error string to
+ * surface inline, or `null` on success (the palette closes).
+ */
+function NewProjectForm({
+  onCancel,
+  onCreate,
+}: {
+  onCancel: () => void
+  onCreate: (relativePath: string) => Promise<string | null>
+}) {
+  const [name, setName] = useState("")
+  const [parent, setParent] = useState("projects")
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    nameRef.current?.focus()
+  }, [])
+
+  const submit = useCallback(async () => {
+    if (busy) return
+    const cleanName = name.trim().replace(/^\/+/, "").replace(/\/+$/, "")
+    if (!cleanName) {
+      setError("Enter a project name")
+      return
+    }
+    const cleanParent = parent.trim().replace(/^\/+/, "").replace(/\/+$/, "")
+    const relative = cleanParent ? `${cleanParent}/${cleanName}` : cleanName
+    setError(null)
+    setBusy(true)
+    try {
+      const err = await onCreate(relative)
+      if (err) setError(err)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, name, parent, onCreate])
+
+  return (
+    <PaletteShell
+      header={
+        <div className="px-3 py-2 text-[13px] font-medium text-popover-foreground">
+          New project
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-3 p-3">
+        <input
+          ref={nameRef}
+          placeholder="my-app"
+          value={name}
+          onChange={e => setName(normalizeProjectName(e.target.value))}
+          onKeyDown={e => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              void submit()
+            }
+            if (e.key === "Escape") {
+              e.preventDefault()
+              onCancel()
+            }
+          }}
+          disabled={busy}
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-[13px] outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen(o => !o)}
+            className="flex w-fit items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <span
+              className={`transition-transform ${advancedOpen ? "rotate-90" : ""}`}
+            >
+              ›
+            </span>
+            Advanced
+          </button>
+          {advancedOpen ? (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12px] text-muted-foreground">
+                Parent folder
+              </span>
+              <div className="flex h-9 w-full items-stretch rounded-md border border-input bg-transparent focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
+                <span className="flex items-center pl-3 pr-1 text-[13px] text-muted-foreground select-none">
+                  ~/
+                </span>
+                <input
+                  placeholder="projects"
+                  value={parent}
+                  onChange={e => setParent(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      void submit()
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault()
+                      onCancel()
+                    }
+                  }}
+                  disabled={busy}
+                  spellCheck={false}
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  className="h-full min-w-0 flex-1 rounded-r-md bg-transparent pr-3 text-[13px] outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+            </label>
+          ) : null}
+        </div>
+        {error ? (
+          <div className="text-[12px] text-destructive">{error}</div>
+        ) : null}
+        <div className="flex items-center gap-2 pt-0.5">
+          <Button
+            type="button"
+            onClick={() => void submit()}
+            disabled={busy || name.trim().length === 0}
+          >
+            Create project
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </PaletteShell>
   )
 }
 

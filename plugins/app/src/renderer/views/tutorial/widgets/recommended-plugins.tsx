@@ -51,12 +51,17 @@ type RevealAction =
   | { surface: "left"; viewName: string }
   | { surface: "right"; viewName: string }
   | { surface: "bottom"; viewName: string }
+  // No surface to reveal (e.g. title-bar items). Enabling the
+  // plugin is the whole interaction; nothing opens.
+  | { surface: "none" }
 
 type RecommendedPlugin = {
   /** Plugin folder name (matches `plugins/<name>/`). */
   name: string
   tagline: string
   reveal: RevealAction
+  /** Only surface / auto-enable when git is installed. */
+  requiresGit?: boolean
 }
 
 /** The core UI plugins the tutorial walks the user through. */
@@ -80,6 +85,13 @@ const RECOMMENDED: RecommendedPlugin[] = [
     name: "git-tree-sidebar",
     tagline: "View changed files and their diffs",
     reveal: { surface: "right", viewName: "git-tree-sidebar" },
+    requiresGit: true,
+  },
+  {
+    name: "commit-button",
+    tagline: "Commit changes right from the title bar",
+    reveal: { surface: "none" },
+    requiresGit: true,
   },
 ]
 
@@ -115,9 +127,9 @@ export async function enableRecommendedPluginsNoSideEffects(
   }
 
   const wanted = new Set(
-    RECOMMENDED.filter(r =>
-      r.name === "git-tree-sidebar" ? gitAvailable : true,
-    ).map(r => r.name),
+    RECOMMENDED.filter(r => (r.requiresGit ? gitAvailable : true)).map(
+      r => r.name,
+    ),
   )
 
   await Promise.all(
@@ -192,7 +204,7 @@ export function RecommendedPluginsWidget() {
   const recommended = useMemo(
     () =>
       RECOMMENDED.filter(r =>
-        r.name === "git-tree-sidebar" ? gitAvailable === true : true,
+        r.requiresGit ? gitAvailable === true : true,
       ),
     [gitAvailable],
   )
@@ -239,10 +251,11 @@ export function RecommendedPluginsWidget() {
         setLeftSidebarTab(reveal.viewName)
       } else if (reveal.surface === "right") {
         setRightSidebarOpenType(reveal.viewName)
-      } else {
+      } else if (reveal.surface === "bottom") {
         setBottomPanelOpen(true)
         setBottomPanelView(reveal.viewName)
       }
+      // "none": nothing to reveal.
     },
     [
       setLeftSidebarOpen,
@@ -262,9 +275,10 @@ export function RecommendedPluginsWidget() {
       } else if (reveal.surface === "right") {
         if (rightSidebarOpenType === reveal.viewName)
           setRightSidebarOpenType(null)
-      } else {
+      } else if (reveal.surface === "bottom") {
         if (bottomPanelView === reveal.viewName) setBottomPanelOpen(false)
       }
+      // "none": nothing to hide.
     },
     [
       leftSidebarTab,
@@ -286,7 +300,7 @@ export function RecommendedPluginsWidget() {
     const next = new Set(pendingReveal)
     for (const folder of pendingReveal) {
       const entry = RECOMMENDED.find(r => r.name === folder)
-      if (!entry) {
+      if (!entry || entry.reveal.surface === "none") {
         next.delete(folder)
         changed = true
         continue
@@ -332,11 +346,15 @@ export function RecommendedPluginsWidget() {
         if (entry) {
           if (enabling) {
             // Queue the reveal (fired once the injection registers).
-            setPendingReveal(prev => {
-              const nextSet = new Set(prev)
-              nextSet.add(name)
-              return nextSet
-            })
+            // Title-bar items (`surface: "none"`) have nothing to
+            // reveal, so skip queuing them.
+            if (entry.reveal.surface !== "none") {
+              setPendingReveal(prev => {
+                const nextSet = new Set(prev)
+                nextSet.add(name)
+                return nextSet
+              })
+            }
           } else {
             setPendingReveal(prev => {
               if (!prev.has(name)) return prev

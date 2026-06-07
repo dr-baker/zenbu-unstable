@@ -16,6 +16,7 @@ import {
   randInt,
 } from "./constants"
 import {
+  clearOnboardingComplete,
   isOnboardingComplete,
   markOnboardingComplete,
 } from "./onboarding-flag"
@@ -386,9 +387,27 @@ function TutorialBody() {
 
   const showSkipButton = !exited && nodeId !== "skip-prompt"
 
+  // Replay onboarding from the top: clear the durable completion
+  // flag and reset the whole state machine back to the intro.
+  const restartTutorial = useCallback(() => {
+    if (timerRef.current != null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    clearOnboardingComplete()
+    setNodeId("intro")
+    setItemIdx(0)
+    setRevealedWords(0)
+    setCompleted([])
+    setQuestOpen(false)
+    setVisited(new Set())
+    setQuestionPhase("none")
+    setExited(false)
+  }, [])
+
   // ---- post-exit fallback ----
   if (!active) {
-    return <PostTutorialPlaceholder />
+    return <PostTutorialPlaceholder onRedo={restartTutorial} />
   }
 
   return (

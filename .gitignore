@@ -49,8 +49,7 @@ traces/
 # Logs from `scripts/gen-plugin-icons.sh`
 .icon-gen-logs/
 
-# Logs from `scripts/gen-plugin-screenshots.sh`
-.screenshot-gen-logs/
-
 # Startup-time experiments / benchmarks
 experiments/
+tmp
+.vercel

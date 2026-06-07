@@ -3,7 +3,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { Service } from "@zenbujs/core/runtime"
-import { DbService } from "@zenbujs/core/services"
+import { DbService, PluginManagerService } from "@zenbujs/core/services"
+import type { PluginManifestRow } from "@zenbujs/core/services"
 import {
   getConfig,
   subscribeConfig,
@@ -62,6 +63,9 @@ const MIME_BY_EXT: Record<string, string> = {
 /** Hard ceiling — favicon-style marks fit comfortably under this. */
 const MAX_ICON_BYTES = 1024 * 1024
 
+/** How often to stat plugin dirs and prune ones deleted off disk. */
+const PRUNE_INTERVAL_MS = 3000
+
 type PluginKind = "plugin" | "pi-extension"
 type PluginTag = "core" | "pi" | null
 type PluginListing = {
@@ -69,6 +73,20 @@ type PluginListing = {
   dir: string
   kind: PluginKind
   tag: PluginTag
+  enabled: boolean
+  description: string | null
+  author: string | null
+  version: string | null
+  // Absolute path to the plugin's manifest entry file. Needed by
+  // the UI to enable/disable/remove the plugin. `null` for core
+  // plugins (declared in zenbu.config.ts, not user-toggleable) and
+  // pi extensions.
+  pluginFile: string | null
+}
+type PackageMeta = {
+  description: string | null
+  author: string | null
+  version: string | null
 }
 type IconRecord = {
   blobId: string
@@ -89,17 +107,93 @@ type DiscoveredIcon = {
  * the sidebar lands alphabetic without the renderer having to
  * re-sort.
  */
-function buildListings(snapshot: ConfigSnapshot): PluginListing[] {
-  const fromPlugins: PluginListing[] = snapshot.plugins.map(p => ({
-    name: p.name,
-    dir: p.dir,
-    kind: "plugin",
-    tag: isCorePluginDir(p.dir) ? "core" : null,
-  }))
+function buildListings(
+  snapshot: ConfigSnapshot,
+  manifestRows: PluginManifestRow[],
+): PluginListing[] {
+  // Enabled (loaded) zenbu plugins come from the config snapshot —
+  // it's authoritative for names/dirs and covers core plugins
+  // declared in `zenbu.config.ts` (which never appear in the
+  // user-toggle manifests).
+  // dir -> manifest entry path, so enabled (snapshot) plugins carry
+  // their toggle path too.
+  const pathByDir = new Map<string, string>()
+  for (const row of manifestRows) {
+    pathByDir.set(path.resolve(path.dirname(row.path)), row.path)
+  }
+
+  const byDir = new Map<string, PluginListing>()
+  for (const p of snapshot.plugins) {
+    const key = path.resolve(p.dir)
+    byDir.set(key, {
+      name: p.name,
+      dir: p.dir,
+      kind: "plugin",
+      tag: isCorePluginDir(p.dir) ? "core" : null,
+      enabled: true,
+      pluginFile: pathByDir.get(key) ?? null,
+      ...readPackageMeta(p.dir),
+    })
+  }
+
+  // Fold in disabled plugins (not in the snapshot) from the manifest
+  // rows so they keep their identity + icon.
+  for (const row of manifestRows) {
+    if (row.enabled) continue
+    const dir = path.dirname(row.path)
+    const key = path.resolve(dir)
+    if (byDir.has(key)) continue
+    byDir.set(key, {
+      name: row.name ?? path.basename(dir),
+      dir,
+      kind: "plugin",
+      tag: isCorePluginDir(dir) ? "core" : null,
+      enabled: false,
+      pluginFile: row.path,
+      ...readPackageMeta(dir),
+    })
+  }
+
   const fromPi: PluginListing[] = readPiExtensions()
-  return [...fromPlugins, ...fromPi].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-  )
+  // Drop anything whose source is gone from disk.
+  return [...byDir.values(), ...fromPi]
+    .filter(p => fs.existsSync(p.dir))
+    .sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    )
+}
+
+// Read package.json metadata (canonical local source) so the UI
+// doesn't read files per-row. Nulls for missing/unparseable fields.
+function readPackageMeta(pluginDir: string): PackageMeta {
+  const empty: PackageMeta = { description: null, author: null, version: null }
+  let raw: string
+  try {
+    raw = fs.readFileSync(path.join(pluginDir, "package.json"), "utf8")
+  } catch {
+    return empty
+  }
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return empty
+  }
+  return {
+    description:
+      typeof parsed.description === "string" ? parsed.description : null,
+    author: extractAuthor(parsed.author),
+    version: typeof parsed.version === "string" ? parsed.version : null,
+  }
+}
+
+function extractAuthor(raw: unknown): string | null {
+  if (typeof raw === "string") return raw
+  if (raw && typeof raw === "object") {
+    const name = (raw as { name?: unknown }).name
+    if (typeof name === "string") return name
+  }
+  return null
 }
 
 function isCorePluginDir(pluginDir: string): boolean {
@@ -128,7 +222,17 @@ function readPiExtensions(): PluginListing[] {
         continue
       }
       const name = entry.replace(/\.ts$/, "")
-      out.push({ name, dir: abs, kind: "pi-extension", tag: "pi" })
+      out.push({
+        name,
+        dir: abs,
+        kind: "pi-extension",
+        tag: "pi",
+        enabled: dir === PI_EXTENSIONS_DIR,
+        description: null,
+        author: null,
+        version: null,
+        pluginFile: null,
+      })
     }
   }
   return out
@@ -143,7 +247,12 @@ function listingsEqual(a: PluginListing[], b: PluginListing[]): boolean {
       x.name !== y.name ||
       x.dir !== y.dir ||
       x.kind !== y.kind ||
-      x.tag !== y.tag
+      x.tag !== y.tag ||
+      x.enabled !== y.enabled ||
+      x.description !== y.description ||
+      x.author !== y.author ||
+      x.version !== y.version ||
+      x.pluginFile !== y.pluginFile
     ) {
       return false
     }
@@ -201,7 +310,7 @@ function discoverIcon(pluginDir: string): DiscoveredIcon | null {
  */
 export class PluginRegistryMirrorService extends Service.create({
   key: "pluginRegistryMirror",
-  deps: { db: DbService },
+  deps: { db: DbService, pluginManager: PluginManagerService },
 }) {
   evaluate() {
     this.setup("mirror-plugin-registry", () => {
@@ -213,10 +322,59 @@ export class PluginRegistryMirrorService extends Service.create({
       void this.syncFromSnapshot(getConfig())
       return unsubscribe
     })
+
+    // subscribeConfig only fires on manifest/config edits, so a
+    // plugin deleted off disk (rm -rf) goes unnoticed. Stat dirs on
+    // an interval and prune the ones that vanished.
+    this.setup("prune-missing-plugins", () => {
+      const timer = setInterval(() => {
+        void this.pruneMissing()
+      }, PRUNE_INTERVAL_MS)
+      return () => clearInterval(timer)
+    })
+  }
+
+  // Drop listings whose dir no longer exists (+ their icons). No DB
+  // write when nothing's missing.
+  private async pruneMissing(): Promise<void> {
+    const listings = this.ctx.db.client.readRoot().app
+      .plugins as PluginListing[]
+    const gone = listings.filter(p => !fs.existsSync(p.dir))
+    if (gone.length === 0) return
+
+    const goneNames = new Set(gone.map(p => p.name))
+    const blobIdsToDelete: string[] = []
+    await this.ctx.db.client.update(root => {
+      root.app.plugins = (root.app.plugins as PluginListing[]).filter(
+        p => !goneNames.has(p.name),
+      )
+      const icons = root.app.pluginIcons as Record<string, IconRecord>
+      for (const name of goneNames) {
+        const rec = icons[name]
+        if (rec) {
+          blobIdsToDelete.push(rec.blobId)
+          delete icons[name]
+        }
+      }
+    })
+    for (const blobId of blobIdsToDelete) {
+      void this.ctx.db.client.deleteBlob(blobId).catch((err: unknown) => {
+        console.error("[plugin-registry-mirror] deleteBlob failed:", err)
+      })
+    }
   }
 
   private async syncFromSnapshot(snapshot: ConfigSnapshot): Promise<void> {
-    const next = buildListings(snapshot)
+    let manifestRows: PluginManifestRow[] = []
+    try {
+      manifestRows = (await this.ctx.pluginManager.list()).rows
+    } catch (err) {
+      console.error(
+        "[plugin-registry-mirror] pluginManager.list() failed:",
+        err,
+      )
+    }
+    const next = buildListings(snapshot, manifestRows)
 
     // Discover icons on disk before opening a DB update — we don't
     // want to hold an update transaction while reading files. Pi

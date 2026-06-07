@@ -10,19 +10,9 @@ import vimExtension from "../extension"
 import { VimModeStatusItem } from "../components/vim-mode-status-item"
 
 /**
- * Content script entry point. Mounts a hidden React root that does
- * one job: read `db.app.settings.vimMode` and (un)register the vim
- * CodeMirror extension under `meta.kind = "cm.composer-extension"`
- * accordingly.
- *
- * The host composer reads the injection registry directly and will
- * reconfigure its compartment whenever this injection appears or
- * disappears — so toggling the setting flips vim on/off live, with
- * no editor remount.
- *
- * Single global injection; uses a fixed name. We use a content
- * script instead of a per-composer advice so multiple composer
- * instances don't fight over the same registry slot.
+ * FIXME: This is stupid, its mounting a react root just to access hooks
+ * when these are available on the main process, do not reference
+ * this code for future plugins
  */
 
 const INJECTION_NAME = "cm-vim/vim"

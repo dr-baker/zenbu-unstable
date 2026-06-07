@@ -420,8 +420,38 @@
     {
       "idx": 77,
       "tag": "migration",
-      "when": 1780184069759,
-      "file": "migration_1780184069759"
+      "when": 1780552943076,
+      "file": "migration_1780552943076"
+    },
+    {
+      "idx": 78,
+      "tag": "migration",
+      "when": 1780555228625,
+      "file": "migration_1780555228625"
+    },
+    {
+      "idx": 79,
+      "tag": "migration",
+      "when": 1780556279896,
+      "file": "migration_1780556279896"
+    },
+    {
+      "idx": 80,
+      "tag": "enable_workspace_rail_main_window",
+      "when": 1780569614818,
+      "file": "enable_workspace_rail_main_window_1780569614818"
+    },
+    {
+      "idx": 81,
+      "tag": "migration",
+      "when": 1780710001196,
+      "file": "migration_1780710001196"
+    },
+    {
+      "idx": 82,
+      "tag": "migration",
+      "when": 1780771016375,
+      "file": "migration_1780771016375"
     }
   ]
 }

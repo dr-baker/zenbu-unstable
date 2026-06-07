@@ -880,6 +880,10 @@ function TreeRow({
 }) {
   const { node, indent, showConnector, isLast, gutters, isOnPath } = row
   const prefix = renderPrefix(indent, showConnector, isLast, gutters)
+  // Visually dim everything that isn't a user message so the user's
+  // own turns stand out at a glance. Dimming is purely cosmetic —
+  // the row stays fully selectable/navigable.
+  const isUserMessage = node.kind === "message" && node.messageRole === "user"
   return (
     <div
       data-row-index={index}
@@ -892,6 +896,7 @@ function TreeRow({
           : isOnPath
             ? "text-foreground hover:bg-accent/40"
             : "text-muted-foreground/70 hover:bg-accent/40",
+        !selected && !isUserMessage && "opacity-50",
       )}
     >
       <span

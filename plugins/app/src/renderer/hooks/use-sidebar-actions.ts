@@ -55,7 +55,11 @@ export function useSidebarActions() {
     const latest = Object.values(root.app.chats)
       .filter(c => c.scopeId === scopeId)
       .sort((a, b) => b.createdAt - a.createdAt)[0]
-    const latestHasMessage = latest?.session.kind === "ready" && root.app.sessionMeta[latest.session.sessionId] != null
+    const latestSession =
+      latest?.session.kind === "ready"
+        ? root.app.sessions[latest.session.sessionId]
+        : undefined
+    const latestHasMessage = latestSession?.lastMessageSentTime != null
     if (latest && !latestHasMessage) {
       void dbClient.update(r => selectChatInRoot(r, windowId, latest.id)).then(() => requestFocusComposer(latest.id))
       return

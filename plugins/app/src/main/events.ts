@@ -102,12 +102,16 @@ export type Events = {
    * (subsequent opens with the same `source` just navigate the
    * existing tab in place). Defaults to `"right"` so legacy
    * callers (file-tree, plan, etc.) keep their historical
-   * "appears to the right" behavior. */
+   * "appears to the right" behavior.
+   *
+   * `placement: "tab"` opens the view as a new tab in the active
+   * pane instead of splitting into a sibling pane. Re-opening with
+   * the same `source` still navigates the existing tab in place. */
   openViewInActivePane: {
     viewType: string;
     source: string;
     args: Record<string, unknown>;
-    placement?: "left" | "right";
+    placement?: "left" | "right" | "tab";
   };
   /** Open Pull Requests view with mode & routing. openMode: new-tab, split-right, replace */
   openPullRequestsView: {

@@ -1,5 +1,6 @@
 {
   "name": "@zenbu/pi-commands",
+  "description": "Use native pi commands inside Zenbu",
   "version": "0.0.1",
   "private": true,
   "type": "module",
