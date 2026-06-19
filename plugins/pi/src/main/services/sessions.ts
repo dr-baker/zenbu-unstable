@@ -53,6 +53,17 @@ import {
   sendQueuedNow,
   stampLastMessageSent,
 } from "./sessions/queue"
+import {
+  withLiveSession,
+  withLiveSessionIfPresent,
+} from "./sessions/live-access"
+import {
+  DEFAULT_SESSION_POOL_POLICY,
+  ensurePoolCapacity,
+  SESSION_PREFETCH_DELAY_MS,
+  sweepIdleSessions,
+  touchSessionUsed,
+} from "./sessions/session-pool"
 
 dotenv.config({
   path: path.resolve(
@@ -108,6 +119,15 @@ export class SessionsService extends Service.create({
   /** Per-session queue mutex tickets — see `withQueueLock` in
    * `./sessions/queue.ts`. */
   readonly queueLocks = new Map<string, Promise<void>>()
+  /** Renderer subscription ids keyed by session. Tracked outside
+   * `LiveSession` so opening a chat tab does not force Pi activation. */
+  readonly subscribers = new Map<string, Set<string>>()
+  /** Background prefetch timers keyed by session id. */
+  private readonly prefetchTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >()
+  readonly poolPolicy = DEFAULT_SESSION_POOL_POLICY
 
   /**
    * Pi's credential store. Owned by `AuthService` — we just read
@@ -115,6 +135,9 @@ export class SessionsService extends Service.create({
    */
   get auth() {
     return this.ctx.auth.storage
+  }
+  get sessionActivity() {
+    return this.ctx.sessionActivity
   }
   /**
    * Pi's model registry. Owned by `AuthService`. Same story as
@@ -156,6 +179,8 @@ export class SessionsService extends Service.create({
       }
     })
 
+    this.subscribers.clear()
+
     await this.ctx.db.client.update(root => {
       for (const s of Object.values(root.pi.sessions)) {
         s.isStreaming = false
@@ -175,6 +200,24 @@ export class SessionsService extends Service.create({
         svc: this,
         processToken: PROCESS_TOKEN,
       })
+    })
+
+    this.setup("session-pool", () => {
+      const unregister = this.ctx.sessionActivity.registerListener({
+        onOpened: sessionId => this.schedulePrefetch(sessionId),
+        onClosed: sessionId => this.cancelPrefetch(sessionId),
+      })
+      const sweep = setInterval(() => {
+        void sweepIdleSessions(this, this.poolPolicy).catch(err =>
+          console.warn("[session-pool] idle sweep failed:", err),
+        )
+      }, 60_000)
+      return () => {
+        unregister()
+        clearInterval(sweep)
+        for (const timer of this.prefetchTimers.values()) clearTimeout(timer)
+        this.prefetchTimers.clear()
+      }
     })
   }
 
@@ -249,28 +292,39 @@ export class SessionsService extends Service.create({
     return moveChatToExistingScope({ svc: this, ...args })
   }
 
-  // ----- subscription bookkeeping -----
+  // ----- subscription bookkeeping (viewer-only — no Pi activation) -----
 
   async subscribe(args: { sessionId: string; subscriberId: string }) {
-    const live = await this.ensureLive(args.sessionId)
-    live.subscribers.add(args.subscriberId)
-    const count = live.subscribers.size
-    await this.ctx.db.client.update(root => {
-      const s = root.pi.sessions[args.sessionId]
-      if (!s) return
-      s.subscriberCount = count
-    })
+    const record = this.ctx.db.client.readRoot().pi.sessions[args.sessionId]
+    if (!record) {
+      throw new Error(`Session ${args.sessionId} not found`)
+    }
+
+    let set = this.subscribers.get(args.sessionId)
+    if (!set) {
+      set = new Set()
+      this.subscribers.set(args.sessionId, set)
+    }
+    set.add(args.subscriberId)
+
+    const live = this.live.get(args.sessionId)
+    live?.subscribers.add(args.subscriberId)
+
+    await this.syncSubscriberCount(args.sessionId)
   }
 
   async unsubscribe(args: { sessionId: string; subscriberId: string }) {
+    const set = this.subscribers.get(args.sessionId)
+    set?.delete(args.subscriberId)
+    if (set?.size === 0) this.subscribers.delete(args.sessionId)
+
     const live = this.live.get(args.sessionId)
-    if (!live) return
-    live.subscribers.delete(args.subscriberId)
-    const count = live.subscribers.size
-    await this.ctx.db.client.update(root => {
-      const s = root.pi.sessions[args.sessionId]
-      if (s) s.subscriberCount = count
-    })
+    live?.subscribers.delete(args.subscriberId)
+
+    await this.syncSubscriberCount(args.sessionId)
+    void sweepIdleSessions(this, this.poolPolicy).catch(err =>
+      console.warn("[session-pool] post-unsubscribe sweep failed:", err),
+    )
   }
 
   // ----- sending / queue -----
@@ -298,23 +352,26 @@ export class SessionsService extends Service.create({
     sessionId: string
     text: string
   }): Promise<void> {
-    const live = await this.ensureLive(args.sessionId)
-    await live.pi.prompt(args.text, {
-      streamingBehavior: live.pi.isStreaming ? "followUp" : undefined,
+    return this.withLive(args.sessionId, async live => {
+      await live.pi.prompt(args.text, {
+        streamingBehavior: live.pi.isStreaming ? "followUp" : undefined,
+      })
+      await stampLastMessageSent({ svc: this, sessionId: args.sessionId })
+      await this.syncRuntimeSnapshot(live)
+      await syncRuntime({ svc: this, live })
     })
-    await stampLastMessageSent({ svc: this, sessionId: args.sessionId })
-    await this.syncRuntimeSnapshot(live)
-    await syncRuntime({ svc: this, live })
   }
 
   async steer(args: { sessionId: string; text: string }) {
-    const live = await this.ensureLive(args.sessionId)
-    await live.pi.steer(args.text)
+    return this.withLive(args.sessionId, async live => {
+      await live.pi.steer(args.text)
+    })
   }
 
   async followUp(args: { sessionId: string; text: string }) {
-    const live = await this.ensureLive(args.sessionId)
-    await live.pi.followUp(args.text)
+    return this.withLive(args.sessionId, async live => {
+      await live.pi.followUp(args.text)
+    })
   }
 
   /**
@@ -325,10 +382,17 @@ export class SessionsService extends Service.create({
    * specific queued message immediately.
    */
   async abort(args: { sessionId: string }) {
-    const live = this.live.get(args.sessionId)
-    if (!live) return
-    await live.pi.abort()
-    await syncRuntime({ svc: this, live })
+    const aborted = await this.withLiveIfPresent(args.sessionId, async live => {
+      await live.pi.abort()
+      await syncRuntime({ svc: this, live })
+      return true
+    })
+    if (aborted) return
+    // Cold session with a stale streaming flag — nothing to abort in pi.
+    await this.ctx.db.client.update(root => {
+      const s = root.pi.sessions[args.sessionId]
+      if (s?.isStreaming) s.isStreaming = false
+    })
   }
 
   async enqueue(args: {
@@ -388,36 +452,40 @@ export class SessionsService extends Service.create({
   // ----- runtime knobs -----
 
   async setModel(args: { sessionId: string; provider: string; id: string }) {
-    const live = await this.ensureLive(args.sessionId)
-    const model = this.models.find(args.provider, args.id)
-    if (!model) {
-      throw new Error(`unknown model ${args.provider}/${args.id}`)
-    }
-    await live.pi.setModel(model)
-    await syncRuntime({ svc: this, live })
+    return this.withLive(args.sessionId, async live => {
+      const model = this.models.find(args.provider, args.id)
+      if (!model) {
+        throw new Error(`unknown model ${args.provider}/${args.id}`)
+      }
+      await live.pi.setModel(model)
+      await syncRuntime({ svc: this, live })
+    })
   }
 
   async cycleModel(args: { sessionId: string }) {
-    const live = await this.ensureLive(args.sessionId)
-    const result = await live.pi.cycleModel()
-    await syncRuntime({ svc: this, live })
-    return result
+    return this.withLive(args.sessionId, async live => {
+      const result = await live.pi.cycleModel()
+      await syncRuntime({ svc: this, live })
+      return result
+    })
   }
 
   async setThinkingLevel(args: {
     sessionId: string
     level: Session["thinkingLevel"]
   }) {
-    const live = await this.ensureLive(args.sessionId)
-    live.pi.setThinkingLevel(args.level)
-    await syncRuntime({ svc: this, live })
+    return this.withLive(args.sessionId, async live => {
+      live.pi.setThinkingLevel(args.level)
+      await syncRuntime({ svc: this, live })
+    })
   }
 
   async cycleThinkingLevel(args: { sessionId: string }) {
-    const live = await this.ensureLive(args.sessionId)
-    const next = live.pi.cycleThinkingLevel()
-    await syncRuntime({ svc: this, live })
-    return next
+    return this.withLive(args.sessionId, async live => {
+      const next = live.pi.cycleThinkingLevel()
+      await syncRuntime({ svc: this, live })
+      return next
+    })
   }
 
   /**
@@ -431,45 +499,49 @@ export class SessionsService extends Service.create({
     sessionId: string
     enabled: boolean
   }) {
-    const live = await this.ensureLive(args.sessionId)
-    live.pi.setAutoCompactionEnabled(args.enabled)
-    await syncRuntime({ svc: this, live })
+    return this.withLive(args.sessionId, async live => {
+      live.pi.setAutoCompactionEnabled(args.enabled)
+      await syncRuntime({ svc: this, live })
+    })
   }
 
   async compact(args: { sessionId: string; instructions?: string }) {
-    const live = await this.ensureLive(args.sessionId)
-    try {
-      return await live.pi.compact(args.instructions)
-    } finally {
-      await syncRuntime({ svc: this, live })
-    }
+    return this.withLive(args.sessionId, async live => {
+      try {
+        return await live.pi.compact(args.instructions)
+      } finally {
+        await syncRuntime({ svc: this, live })
+      }
+    })
   }
 
   async reload(args: { sessionId: string }): Promise<{ ok: true }> {
-    const live = await this.ensureLive(args.sessionId)
-    await live.pi.reload()
-    await this.syncPiRuntimeCommands(live)
-    await this.syncRuntimeSnapshot(live)
-    await syncRuntime({ svc: this, live })
-    return { ok: true }
+    return this.withLive(args.sessionId, async live => {
+      await live.pi.reload()
+      await this.syncPiRuntimeCommands(live)
+      await this.syncRuntimeSnapshot(live)
+      await syncRuntime({ svc: this, live })
+      return { ok: true }
+    })
   }
 
   async exportSession(args: {
     sessionId: string
     outputPath?: string
   }): Promise<{ path: string; format: "html" | "jsonl" }> {
-    const live = await this.ensureLive(args.sessionId)
-    const outputPath = args.outputPath?.trim() || undefined
-    if (outputPath?.endsWith(".jsonl")) {
-      return {
-        path: live.pi.exportToJsonl(outputPath),
-        format: "jsonl",
+    return this.withLive(args.sessionId, async live => {
+      const outputPath = args.outputPath?.trim() || undefined
+      if (outputPath?.endsWith(".jsonl")) {
+        return {
+          path: live.pi.exportToJsonl(outputPath),
+          format: "jsonl",
+        }
       }
-    }
-    return {
-      path: await live.pi.exportToHtml(outputPath),
-      format: "html",
-    }
+      return {
+        path: await live.pi.exportToHtml(outputPath),
+        format: "html",
+      }
+    })
   }
 
   async shareSession(args: { sessionId: string }): Promise<{
@@ -481,62 +553,64 @@ export class SessionsService extends Service.create({
       throw new Error("GitHub CLI is not logged in. Run `gh auth login` first.")
     }
 
-    const live = await this.ensureLive(args.sessionId)
-    const tmpFile = path.join(os.tmpdir(), `pi-session-${args.sessionId}.html`)
-    await live.pi.exportToHtml(tmpFile)
+    return this.withLive(args.sessionId, async live => {
+      const tmpFile = path.join(os.tmpdir(), `pi-session-${args.sessionId}.html`)
+      await live.pi.exportToHtml(tmpFile)
 
-    const result = await new Promise<{
-      stdout: string
-      stderr: string
-      code: number | null
-    }>((resolve, reject) => {
-      const proc = spawn("gh", ["gist", "create", "--public=false", tmpFile])
-      let stdout = ""
-      let stderr = ""
-      proc.stdout?.on("data", chunk => {
-        stdout += String(chunk)
+      const result = await new Promise<{
+        stdout: string
+        stderr: string
+        code: number | null
+      }>((resolve, reject) => {
+        const proc = spawn("gh", ["gist", "create", "--public=false", tmpFile])
+        let stdout = ""
+        let stderr = ""
+        proc.stdout?.on("data", chunk => {
+          stdout += String(chunk)
+        })
+        proc.stderr?.on("data", chunk => {
+          stderr += String(chunk)
+        })
+        proc.on("error", reject)
+        proc.on("close", code => resolve({ stdout, stderr, code }))
       })
-      proc.stderr?.on("data", chunk => {
-        stderr += String(chunk)
-      })
-      proc.on("error", reject)
-      proc.on("close", code => resolve({ stdout, stderr, code }))
+      if (result.code !== 0) {
+        throw new Error(result.stderr.trim() || "Failed to create gist")
+      }
+      const gistUrl = result.stdout.trim()
+      const gistId = gistUrl.split("/").pop()
+      if (!gistId) throw new Error("Failed to parse gist id from gh output")
+      const base = process.env.PI_SHARE_VIEWER_URL || "https://pi.dev/session/"
+      return { gistUrl, viewerUrl: `${base}#${gistId}` }
     })
-    if (result.code !== 0) {
-      throw new Error(result.stderr.trim() || "Failed to create gist")
-    }
-    const gistUrl = result.stdout.trim()
-    const gistId = gistUrl.split("/").pop()
-    if (!gistId) throw new Error("Failed to parse gist id from gh output")
-    const base = process.env.PI_SHARE_VIEWER_URL || "https://pi.dev/session/"
-    return { gistUrl, viewerUrl: `${base}#${gistId}` }
   }
 
   async getLastAssistantText(args: { sessionId: string }): Promise<{
     text: string | null
   }> {
-    const live = await this.ensureLive(args.sessionId)
-    return { text: live.pi.getLastAssistantText() ?? null }
+    return this.withLive(args.sessionId, async live => ({
+      text: live.pi.getLastAssistantText() ?? null,
+    }))
   }
 
   async setSessionName(args: {
     sessionId: string
     name: string
   }): Promise<{ ok: true }> {
-    const live = await this.ensureLive(args.sessionId)
-    live.pi.setSessionName(args.name)
-    await syncRuntime({ svc: this, live })
-    return { ok: true }
+    return this.withLive(args.sessionId, async live => {
+      live.pi.setSessionName(args.name)
+      await syncRuntime({ svc: this, live })
+      return { ok: true }
+    })
   }
 
   async getSessionInfo(args: { sessionId: string }) {
-    const live = await this.ensureLive(args.sessionId)
-    return {
+    return this.withLive(args.sessionId, async live => ({
       name: live.pi.sessionName ?? null,
       file: live.pi.sessionFile ?? null,
       id: live.pi.sessionId,
       stats: live.pi.getSessionStats(),
-    }
+    }))
   }
 
   // ----- tree navigation -----
@@ -575,24 +649,25 @@ export class SessionsService extends Service.create({
     editorText: string | null
     summarized: boolean
   }> {
-    const live = await this.ensureLive(args.sessionId)
-    const result = await live.pi.navigateTree(args.entryId, {
-      summarize: args.summarize,
-      customInstructions: args.customInstructions,
-      replaceInstructions: args.replaceInstructions,
+    return this.withLive(args.sessionId, async live => {
+      const result = await live.pi.navigateTree(args.entryId, {
+        summarize: args.summarize,
+        customInstructions: args.customInstructions,
+        replaceInstructions: args.replaceInstructions,
+      })
+      const ctx = {
+        db: this.ctx.db.client,
+        getLive: (id: string) => this.live.get(id),
+      }
+      await rebuildEventLogFromCurrentPath({ ctx, live })
+      await syncRuntime({ svc: this, live })
+      return {
+        cancelled: result.cancelled,
+        aborted: result.aborted ?? false,
+        editorText: result.editorText ?? null,
+        summarized: !!result.summaryEntry,
+      }
     })
-    const ctx = {
-      db: this.ctx.db.client,
-      getLive: (id: string) => this.live.get(id),
-    }
-    await rebuildEventLogFromCurrentPath({ ctx, live })
-    await syncRuntime({ svc: this, live })
-    return {
-      cancelled: result.cancelled,
-      aborted: result.aborted ?? false,
-      editorText: result.editorText ?? null,
-      summarized: !!result.summaryEntry,
-    }
   }
 
   /**
@@ -601,9 +676,9 @@ export class SessionsService extends Service.create({
    * no summary is running — pi handles the no-op internally.
    */
   async abortBranchSummary(args: { sessionId: string }) {
-    const live = this.live.get(args.sessionId)
-    if (!live) return
-    live.pi.abortBranchSummary()
+    await this.withLiveIfPresent(args.sessionId, async live => {
+      live.pi.abortBranchSummary()
+    })
   }
 
   /**
@@ -615,27 +690,28 @@ export class SessionsService extends Service.create({
     branched: boolean
     targetEntryId: string | null
   }> {
-    const live = await this.ensureLive(args.sessionId)
-    const entries = live.pi.sessionManager.getEntries()
-    let lastUserEntry: { id: string; parentId: string | null } | null = null
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const e = entries[i] as any
-      if (e?.type === "message" && e?.message?.role === "user") {
-        lastUserEntry = { id: e.id, parentId: e.parentId ?? null }
-        break
+    return this.withLive(args.sessionId, async live => {
+      const entries = live.pi.sessionManager.getEntries()
+      let lastUserEntry: { id: string; parentId: string | null } | null = null
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const e = entries[i] as any
+        if (e?.type === "message" && e?.message?.role === "user") {
+          lastUserEntry = { id: e.id, parentId: e.parentId ?? null }
+          break
+        }
       }
-    }
-    if (!lastUserEntry || !lastUserEntry.parentId) {
-      return { branched: false, targetEntryId: null }
-    }
-    live.pi.sessionManager.branch(lastUserEntry.parentId)
-    const ctx = {
-      db: this.ctx.db.client,
-      getLive: (id: string) => this.live.get(id),
-    }
-    await rebuildEventLogFromCurrentPath({ ctx, live })
-    await syncRuntime({ svc: this, live })
-    return { branched: true, targetEntryId: lastUserEntry.parentId }
+      if (!lastUserEntry || !lastUserEntry.parentId) {
+        return { branched: false, targetEntryId: null }
+      }
+      live.pi.sessionManager.branch(lastUserEntry.parentId)
+      const ctx = {
+        db: this.ctx.db.client,
+        getLive: (id: string) => this.live.get(id),
+      }
+      await rebuildEventLogFromCurrentPath({ ctx, live })
+      await syncRuntime({ svc: this, live })
+      return { branched: true, targetEntryId: lastUserEntry.parentId }
+    })
   }
 
   async getEntryTree(args: { sessionId: string }): Promise<{
@@ -653,21 +729,22 @@ export class SessionsService extends Service.create({
     }>
     leafId: string | null
   }> {
-    const live = await this.ensureLive(args.sessionId)
-    const raw = live.pi.sessionManager.getEntries()
-    const leafId = live.pi.sessionManager.getLeafId() ?? null
-    const entries = raw.map(e => ({
-      id: e.id,
-      parentId: e.parentId,
-      kind: e.type,
-      label: deriveEntryLabel({ entry: e }),
-      timestamp: parseTimestamp({ ts: e.timestamp }),
-      messageRole:
-        e.type === "message"
-          ? ((e as { message?: { role?: string } }).message?.role ?? null)
-          : null,
-    }))
-    return { entries, leafId }
+    return this.withLive(args.sessionId, async live => {
+      const raw = live.pi.sessionManager.getEntries()
+      const leafId = live.pi.sessionManager.getLeafId() ?? null
+      const entries = raw.map(e => ({
+        id: e.id,
+        parentId: e.parentId,
+        kind: e.type,
+        label: deriveEntryLabel({ entry: e }),
+        timestamp: parseTimestamp({ ts: e.timestamp }),
+        messageRole:
+          e.type === "message"
+            ? ((e as { message?: { role?: string } }).message?.role ?? null)
+            : null,
+      }))
+      return { entries, leafId }
+    })
   }
 
   // ----- composer events -----
@@ -720,21 +797,94 @@ export class SessionsService extends Service.create({
   // ----- internals shared with helper modules -----
 
   /**
+   * Canonical lazy-activation wrapper for Pi agent interactions. Prefer
+   * this over calling `ensureLive()` directly so new code paths stay
+   * consistent. See `VIEWER_ONLY_SESSION_RPC` for RPC methods that must
+   * stay cold.
+   */
+  withLive<T>(
+    sessionId: string,
+    fn: (live: LiveSession) => Promise<T>,
+  ): Promise<T> {
+    return withLiveSession(this, sessionId, fn)
+  }
+
+  /** Run against an already-live session without cold activation. */
+  withLiveIfPresent<T>(
+    sessionId: string,
+    fn: (live: LiveSession) => Promise<T>,
+  ): Promise<T | undefined> {
+    return withLiveSessionIfPresent(this, sessionId, fn)
+  }
+
+  /**
    * Get-or-create a live `LiveSession` for the given session id.
    * Public because helper modules under `./sessions/` reach in
-   * through `svc.ensureLive(...)` rather than re-implementing the
-   * dedup-on-concurrent-callers logic.
+   * through `svc.ensureLive(...)` / `svc.withLive(...)` rather than
+   * re-implementing the dedup-on-concurrent-callers logic.
    */
   async ensureLive(sessionId: string): Promise<LiveSession> {
     const existing = this.live.get(sessionId)
-    if (existing) return existing
+    if (existing) {
+      touchSessionUsed(existing)
+      return existing
+    }
     const inflight = this.activating.get(sessionId)
     if (inflight) return inflight
-    const p = activate({ svc: this, sessionId }).finally(() =>
-      this.activating.delete(sessionId),
-    )
+    await ensurePoolCapacity(this, sessionId, this.poolPolicy)
+    const p = activate({ svc: this, sessionId })
+      .then(live => {
+        this.adoptSubscribers(sessionId, live)
+        touchSessionUsed(live)
+        return live
+      })
+      .finally(() => this.activating.delete(sessionId))
     this.activating.set(sessionId, p)
     return p
+  }
+
+  /** Best-effort background warm when a session enters the viewer set. */
+  private schedulePrefetch(sessionId: string): void {
+    this.cancelPrefetch(sessionId)
+    const timer = setTimeout(() => {
+      this.prefetchTimers.delete(sessionId)
+      void this.prefetch(sessionId)
+    }, SESSION_PREFETCH_DELAY_MS)
+    this.prefetchTimers.set(sessionId, timer)
+  }
+
+  private cancelPrefetch(sessionId: string): void {
+    const timer = this.prefetchTimers.get(sessionId)
+    if (!timer) return
+    clearTimeout(timer)
+    this.prefetchTimers.delete(sessionId)
+  }
+
+  private async prefetch(sessionId: string): Promise<void> {
+    if (this.live.has(sessionId) || this.activating.has(sessionId)) return
+    if (!this.ctx.sessionActivity.isViewed(sessionId)) return
+    const record = this.ctx.db.client.readRoot().pi.sessions[sessionId]
+    if (!record || record.archived) return
+    try {
+      await this.ensureLive(sessionId)
+    } catch (err) {
+      console.warn(`[session-pool] prefetch failed for ${sessionId}:`, err)
+    }
+  }
+
+  /** Copy pre-subscribe renderer ids onto a freshly activated session. */
+  private adoptSubscribers(sessionId: string, live: LiveSession): void {
+    const set = this.subscribers.get(sessionId)
+    if (!set) return
+    for (const id of set) live.subscribers.add(id)
+  }
+
+  private async syncSubscriberCount(sessionId: string): Promise<void> {
+    const count = this.subscribers.get(sessionId)?.size ?? 0
+    await this.ctx.db.client.update(root => {
+      const s = root.pi.sessions[sessionId]
+      if (s) s.subscriberCount = count
+    })
   }
 
   /**

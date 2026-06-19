@@ -25,7 +25,18 @@ const RESOURCES =
 
 export default definePlugin({
   name: "pi",
-  services: ["./src/main/services/*.ts"],
+  // Keep this explicit so helper/test modules under services/ are not evaluated
+  // as runtime services. Loading `*.test.ts` at app boot pulls in Vitest and
+  // crashes outside the test runner.
+  services: [
+    "./src/main/services/auth.ts",
+    "./src/main/services/pi-event-log.ts",
+    "./src/main/services/pi-resource-registry.ts",
+    "./src/main/services/pi-resource-state-view.ts",
+    "./src/main/services/pi-runtime.ts",
+    "./src/main/services/session-activity.ts",
+    "./src/main/services/sessions.ts",
+  ],
   schema: "./src/main/schema/index.ts",
   events: "./src/main/events.ts",
   migrations: "./migrations",

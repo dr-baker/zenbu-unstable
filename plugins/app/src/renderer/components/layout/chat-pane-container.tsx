@@ -502,6 +502,17 @@ function TabPanel({
     [traceSubjectKey, visible, scopeId, paneId, tab.id, tabChatId],
   )
 
+  const wasVisibleRef = useRef(visible)
+  useEffect(() => {
+    const wasVisible = wasVisibleRef.current
+    wasVisibleRef.current = visible
+    if (wasVisible && !visible && traceSubjectKey) {
+      perfTrace.endFlowForSubject(traceSubjectKey, "chat.open", {
+        terminal: "tab-hidden",
+      })
+    }
+  }, [visible, traceSubjectKey])
+
   useEffect(() => {
     if (!visible || !traceSubjectKey || tab.content.kind !== "chat") return
     perfTrace.ensureFlow(

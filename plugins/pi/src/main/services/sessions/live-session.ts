@@ -95,13 +95,20 @@ export class LiveSession {
     pi: AgentSession
     onEvent: (live: LiveSession, event: AgentSessionEvent) => void
   }) {
+    const now = Date.now()
     this.sessionId = args.sessionId
     this.pi = args.pi
+    this.activatedAt = now
+    this.lastUsedAt = now
     this.unsubscribePi = args.pi.subscribe(event => args.onEvent(this, event))
   }
 
   readonly sessionId: string
   readonly pi: AgentSession
+  /** When this live session was first activated in this process. */
+  readonly activatedAt: number
+  /** Last Pi interaction or prefetch touch — drives pool LRU eviction. */
+  lastUsedAt: number
 
   addDisposer(fn: () => void) {
     this.extraDisposers.push(fn)

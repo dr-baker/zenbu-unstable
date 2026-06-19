@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import {
+  Profiler,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ProfilerOnRenderCallback,
+} from "react"
 import { toast } from "sonner"
 import { useCollection, useDb, useDbClient, useRpc } from "@zenbujs/core/react"
 import { ChatDisplay } from "./chat-display"
@@ -147,6 +155,25 @@ export function ChatPane({
   const [pendingThinkingLevel, setPendingThinkingLevel] =
     useState<Session["thinkingLevel"]>("medium")
   const traceSubjectKey = traceContext?.visible === false ? null : traceContext?.subjectKey ?? null
+  const isPendingPane = chat == null && pendingChat != null
+  const traceVisibleStartRef = useRef<VisibleTraceStart | null>(null)
+
+  useEffect(() => {
+    if (!traceSubjectKey) {
+      traceVisibleStartRef.current = null
+      return
+    }
+    traceVisibleStartRef.current = {
+      subjectKey: traceSubjectKey,
+      at: performance.now(),
+    }
+    perfTrace.markForSubject(traceSubjectKey, "chat.visible.start", {
+      chatId: chat?.id ?? null,
+      sessionId,
+      scopeId: effectiveScopeId,
+      pending: isPendingPane,
+    })
+  }, [traceSubjectKey, chat?.id, sessionId, effectiveScopeId, isPendingPane])
 
   useEffect(() => {
     if (!traceSubjectKey) return
@@ -157,7 +184,7 @@ export function ChatPane({
         chatId: chat?.id ?? null,
         sessionId,
         scopeId: effectiveScopeId,
-        pending: chat == null && pendingChat != null,
+        pending: isPendingPane,
         composerId: composerBindingId,
         ...(traceContext?.args ?? {}),
       },
@@ -167,7 +194,7 @@ export function ChatPane({
       chatId: chat?.id ?? null,
       sessionId,
       scopeId: effectiveScopeId,
-      pending: chat == null && pendingChat != null,
+      pending: isPendingPane,
       canCompose,
     })
     const frame = window.requestAnimationFrame(() => {
@@ -183,6 +210,7 @@ export function ChatPane({
     traceContext?.args,
     chat,
     pendingChat,
+    isPendingPane,
     sessionId,
     effectiveScopeId,
     composerBindingId,
@@ -212,8 +240,13 @@ export function ChatPane({
       )
       .catch(err => console.error("[chat] subscribe failed:", err))
     return () => {
-      rpc.pi.sessions
-        .unsubscribe({ sessionId, subscriberId })
+      void perfTrace
+        .asyncSpanForSubject(
+          traceSubjectKey,
+          "chat.session.unsubscribe",
+          () => rpc.pi.sessions.unsubscribe({ sessionId, subscriberId }),
+          { sessionId, subscriberId },
+        )
         .catch(err => console.error("[chat] unsubscribe failed:", err))
     }
   }, [sessionId, windowId, rpc, traceSubjectKey])
@@ -260,8 +293,30 @@ export function ChatPane({
       collectionId: eventLogTrace.id,
       debugName: eventLogTrace.debugName,
       sessionId,
+      visibleElapsedMs: traceVisibleElapsedMs(
+        traceVisibleStartRef.current,
+        traceSubjectKey,
+      ),
     })
   }, [traceSubjectKey, eventLogTrace.id, eventLogTrace.debugName, sessionId])
+
+  const lastEventLogObservedTraceRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!traceSubjectKey || !eventLogTrace.id) return
+    const key = `${traceSubjectKey}:${eventLogTrace.id}:observed`
+    if (lastEventLogObservedTraceRef.current === key) return
+    lastEventLogObservedTraceRef.current = key
+    perfTrace.markForSubject(traceSubjectKey, "chat.event_log.collection_observed", {
+      collectionId: eventLogTrace.id,
+      debugName: eventLogTrace.debugName,
+      itemCount: events.length,
+      lastSeq: events.at(-1)?.seq,
+      visibleElapsedMs: traceVisibleElapsedMs(
+        traceVisibleStartRef.current,
+        traceSubjectKey,
+      ),
+    })
+  }, [traceSubjectKey, eventLogTrace.id, eventLogTrace.debugName, events])
 
   const lastEventItemsTraceRef = useRef<string | null>(null)
   useEffect(() => {
@@ -273,6 +328,10 @@ export function ChatPane({
       collectionId: eventLogTrace.id,
       itemCount: events.length,
       lastSeq: events.at(-1)?.seq,
+      visibleElapsedMs: traceVisibleElapsedMs(
+        traceVisibleStartRef.current,
+        traceSubjectKey,
+      ),
     })
   }, [traceSubjectKey, eventLogTrace.id, events])
 
@@ -286,8 +345,36 @@ export function ChatPane({
       collectionId: filePathsTrace.id,
       debugName: filePathsTrace.debugName,
       scopeId: effectiveScopeId,
+      visibleElapsedMs: traceVisibleElapsedMs(
+        traceVisibleStartRef.current,
+        traceSubjectKey,
+      ),
     })
   }, [traceSubjectKey, filePathsTrace.id, filePathsTrace.debugName, effectiveScopeId])
+
+  const lastFilePathObservedTraceRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!traceSubjectKey || !filePathsTrace.id) return
+    const key = `${traceSubjectKey}:${filePathsTrace.id}:observed`
+    if (lastFilePathObservedTraceRef.current === key) return
+    lastFilePathObservedTraceRef.current = key
+    perfTrace.markForSubject(traceSubjectKey, "chat.file_paths.collection_observed", {
+      collectionId: filePathsTrace.id,
+      debugName: filePathsTrace.debugName,
+      itemCount: filePathItems.length,
+      scopeId: effectiveScopeId,
+      visibleElapsedMs: traceVisibleElapsedMs(
+        traceVisibleStartRef.current,
+        traceSubjectKey,
+      ),
+    })
+  }, [
+    traceSubjectKey,
+    filePathsTrace.id,
+    filePathsTrace.debugName,
+    filePathItems.length,
+    effectiveScopeId,
+  ])
 
   const lastFilePathItemsTraceRef = useRef<string | null>(null)
   useEffect(() => {
@@ -298,6 +385,10 @@ export function ChatPane({
     perfTrace.markForSubject(traceSubjectKey, "chat.file_paths.first_items", {
       collectionId: filePathsTrace.id,
       itemCount: filePathItems.length,
+      visibleElapsedMs: traceVisibleElapsedMs(
+        traceVisibleStartRef.current,
+        traceSubjectKey,
+      ),
     })
   }, [traceSubjectKey, filePathsTrace.id, filePathItems.length])
 
@@ -461,112 +552,136 @@ export function ChatPane({
   //     the user pick the no-op.
   //   - exactly one of `/lock` or `/unlock`, same idea.
   const slashCommands = useMemo<SlashCommand[]>(() => {
-    const runtimeCmds: SlashCommand[] = runtimeCommandRows.map(cmd => ({
-      id: `pi-runtime:${encodeURIComponent(cmd.name)}`,
-      label: cmd.name,
-      description: cmd.description ?? undefined,
-      group: runtimeCommandGroup(cmd.source),
-      hint: cmd.hint,
-      action: `pi-runtime:${encodeURIComponent(cmd.name)}`,
-      completionText: `/${cmd.name}`,
-    }))
-    const runtimeNames = new Set(runtimeCommandRows.map(cmd => cmd.name))
-    const registeredCmds: SlashCommand[] = Object.values(registeredSlashCommands)
-      .filter(cmd => !runtimeNames.has(cmd.name))
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(cmd => ({
-        id: `registered:${cmd.id}`,
-        label: cmd.label,
+    const registeredRows = Object.values(registeredSlashCommands)
+    const span = perfTrace.startSpanForSubject(
+      traceSubjectKey,
+      "chat.slash_commands.build",
+      {
+        runtimeCommandCount: runtimeCommandRows.length,
+        registeredCommandCount: registeredRows.length,
+        locked,
+        defaultSendMode,
+      },
+    )
+    try {
+      const runtimeCmds: SlashCommand[] = runtimeCommandRows.map(cmd => ({
+        id: `pi-runtime:${encodeURIComponent(cmd.name)}`,
+        label: cmd.name,
         description: cmd.description ?? undefined,
-        group: cmd.group ?? undefined,
-        hint: cmd.hint ?? cmd.source ?? undefined,
-        action: cmd.insertOnSelect ? undefined : `registered:${cmd.id}`,
-        insertText: cmd.insertOnSelect ? `/${cmd.name} ` : undefined,
+        group: runtimeCommandGroup(cmd.source),
+        hint: cmd.hint,
+        action: `pi-runtime:${encodeURIComponent(cmd.name)}`,
         completionText: `/${cmd.name}`,
       }))
-    const hasRegistered = (name: string) =>
-      runtimeNames.has(name) || Object.values(registeredSlashCommands).some(cmd => cmd.name === name)
+      const runtimeNames = new Set(runtimeCommandRows.map(cmd => cmd.name))
+      const registeredCmds: SlashCommand[] = registeredRows
+        .filter(cmd => !runtimeNames.has(cmd.name))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(cmd => ({
+          id: `registered:${cmd.id}`,
+          label: cmd.label,
+          description: cmd.description ?? undefined,
+          group: cmd.group ?? undefined,
+          hint: cmd.hint ?? cmd.source ?? undefined,
+          action: cmd.insertOnSelect ? undefined : `registered:${cmd.id}`,
+          insertText: cmd.insertOnSelect ? `/${cmd.name} ` : undefined,
+          completionText: `/${cmd.name}`,
+        }))
+      const hasRegistered = (name: string) =>
+        runtimeNames.has(name) || registeredRows.some(cmd => cmd.name === name)
 
-    const sendCmds: SlashCommand[] = [
-      {
-        id: "queue",
-        label: "queue",
-        description: "send now, queue after the current turn finishes",
-        completionText: "/queue",
-        submitWith: "followUp",
-      },
-      {
-        id: "steer",
-        label: "steer",
-        description: "send now, interject before the agent's next LLM call",
-        completionText: "/steer",
-        submitWith: "steer",
-      },
-    ]
-    const defaultCmd: SlashCommand =
-      defaultSendMode === "followUp"
+      const sendCmds: SlashCommand[] = [
+        {
+          id: "queue",
+          label: "queue",
+          description: "send now, queue after the current turn finishes",
+          completionText: "/queue",
+          submitWith: "followUp",
+        },
+        {
+          id: "steer",
+          label: "steer",
+          description: "send now, interject before the agent's next LLM call",
+          completionText: "/steer",
+          submitWith: "steer",
+        },
+      ]
+      const defaultCmd: SlashCommand =
+        defaultSendMode === "followUp"
+          ? {
+              id: "set-default-steer",
+              label: "set default to steer",
+              description: "plain Enter while streaming will steer",
+              action: "set-default-steer",
+              completionText: "/set-default-steer",
+            }
+          : {
+              id: "set-default-queue",
+              label: "set default to queue",
+              description: "plain Enter while streaming will queue",
+              action: "set-default-queue",
+              completionText: "/set-default-queue",
+            }
+      const lockCmd: SlashCommand = locked
         ? {
-            id: "set-default-steer",
-            label: "set default to steer",
-            description: "plain Enter while streaming will steer",
-            action: "set-default-steer",
-            completionText: "/set-default-steer",
+            id: "unlock",
+            label: "unlock",
+            description: "allow Enter to send again",
+            action: "unlock",
+            completionText: "/unlock",
           }
         : {
-            id: "set-default-queue",
-            label: "set default to queue",
-            description: "plain Enter while streaming will queue",
-            action: "set-default-queue",
-            completionText: "/set-default-queue",
+            id: "lock",
+            label: "lock",
+            description: "lock the input so Enter inserts a newline",
+            action: "lock",
+            completionText: "/lock",
           }
-    const lockCmd: SlashCommand = locked
-      ? {
-          id: "unlock",
-          label: "unlock",
-          description: "allow Enter to send again",
-          action: "unlock",
-          completionText: "/unlock",
-        }
-      : {
-          id: "lock",
-          label: "lock",
-          description: "lock the input so Enter inserts a newline",
-          action: "lock",
-          completionText: "/lock",
-        }
-    const cloneCmd: SlashCommand = {
-      id: "clone",
-      label: "clone",
-      description: "duplicate the session at the current position",
-      action: "clone",
-      completionText: "/clone",
+      const cloneCmd: SlashCommand = {
+        id: "clone",
+        label: "clone",
+        description: "duplicate the session at the current position",
+        action: "clone",
+        completionText: "/clone",
+      }
+      const workspaceCmd: SlashCommand = {
+        id: "workspace",
+        label: "move-to-worktree",
+        description: "move this chat into a new git worktree",
+        action: "openWorkspace",
+        completionText: "/move-to-worktree",
+      }
+      const handoffCmd: SlashCommand = {
+        id: "worktree-handoff",
+        label: "worktree-handoff",
+        description:
+          "rebase onto / land on another worktree (run twice: rebase, test, land)",
+        action: "openHandoff",
+        completionText: "/worktree-handoff",
+      }
+      const commands = [
+        ...sendCmds,
+        ...runtimeCmds,
+        ...registeredCmds,
+        workspaceCmd,
+        handoffCmd,
+        ...(hasRegistered("clone") ? [] : [cloneCmd]),
+        defaultCmd,
+        lockCmd,
+      ]
+      span?.end({ commandCount: commands.length })
+      return commands
+    } catch (err) {
+      span?.end({ error: traceError(err) })
+      throw err
     }
-    const workspaceCmd: SlashCommand = {
-      id: "workspace",
-      label: "move-to-worktree",
-      description: "move this chat into a new git worktree",
-      action: "openWorkspace",
-      completionText: "/move-to-worktree",
-    }
-    const handoffCmd: SlashCommand = {
-      id: "worktree-handoff",
-      label: "worktree-handoff",
-      description:
-        "rebase onto / land on another worktree (run twice: rebase, test, land)",
-      action: "openHandoff",
-      completionText: "/worktree-handoff",
-    }
-    return [
-      ...sendCmds,
-      ...runtimeCmds,
-      ...registeredCmds,
-      workspaceCmd,
-      handoffCmd,
-      ...(hasRegistered("clone") ? [] : [cloneCmd]),
-      defaultCmd,
-      lockCmd,
-    ]
-  }, [locked, defaultSendMode, runtimeCommandRows, registeredSlashCommands])
+  }, [
+    locked,
+    defaultSendMode,
+    runtimeCommandRows,
+    registeredSlashCommands,
+    traceSubjectKey,
+  ])
 
   // Panel state for slash commands that take over the composer
   // slot. `/tree` and `/fork` share the same component with
@@ -767,16 +882,9 @@ export function ChatPane({
 
   const messages = useMemo(() => {
     if (!session) return []
-    return perfTrace.spanForSubject(
+    const span = perfTrace.startSpanForSubject(
       traceSubjectKey,
       "chat.messages.materialize",
-      () =>
-        materializeMessages(events, {
-          directory: chatDirectory,
-          extraDirectories: chatExtraDirectories,
-          workspaceId: chatWorkspaceId,
-          scopeId: chatScopeId,
-        }),
       {
         eventCount: events.length,
         sessionId,
@@ -784,6 +892,19 @@ export function ChatPane({
         scopeId: chatScopeId,
       },
     )
+    try {
+      const materialized = materializeMessages(events, {
+        directory: chatDirectory,
+        extraDirectories: chatExtraDirectories,
+        workspaceId: chatWorkspaceId,
+        scopeId: chatScopeId,
+      })
+      span?.end({ messageCount: materialized.length })
+      return materialized
+    } catch (err) {
+      span?.end({ error: traceError(err) })
+      throw err
+    }
   }, [
     events,
     session,
@@ -1320,6 +1441,33 @@ export function ChatPane({
     }
   }
 
+  const handleProfileRender = useCallback<ProfilerOnRenderCallback>(
+    (id, phase, actualDuration, baseDuration, startTime, commitTime) => {
+      if (!traceSubjectKey) return
+      perfTrace.markForSubject(traceSubjectKey, "chat.render.commit", {
+        component: id,
+        phase,
+        actualDurationMs: roundTraceMs(actualDuration),
+        baseDurationMs: roundTraceMs(baseDuration),
+        startOffsetMs: roundTraceMs(startTime),
+        commitOffsetMs: roundTraceMs(commitTime),
+        chatId: chat?.id ?? null,
+        sessionId,
+        scopeId: effectiveScopeId,
+        eventCount: events.length,
+        messageCount: displayMessages.length,
+      })
+    },
+    [
+      traceSubjectKey,
+      chat?.id,
+      sessionId,
+      effectiveScopeId,
+      events.length,
+      displayMessages.length,
+    ],
+  )
+
   return (
     <div
       className={cn(
@@ -1350,20 +1498,22 @@ export function ChatPane({
             hasOverflow={chatHasOverflow}
           />
         ) : null}
-        <ErrorBoundary label="Chat">
-          <ChatDisplay
-            messages={displayMessages}
-            streaming={streaming}
-            loadingStats={loadingStats}
-            traceSubjectKey={traceSubjectKey}
-            scrollToBottomRef={scrollToBottomRef}
-            onHasOverflowChange={setChatHasOverflow}
-            onEditSubmit={handleEditSubmit}
-            onRevertSubmit={handleRevertSubmit}
-            onOpenDiff={handleOpenDiff}
-            onOpenToolOutput={handleOpenToolOutput}
-          />
-        </ErrorBoundary>
+        <Profiler id="chat.display" onRender={handleProfileRender}>
+          <ErrorBoundary label="Chat">
+            <ChatDisplay
+              messages={displayMessages}
+              streaming={streaming}
+              loadingStats={loadingStats}
+              traceSubjectKey={traceSubjectKey}
+              scrollToBottomRef={scrollToBottomRef}
+              onHasOverflowChange={setChatHasOverflow}
+              onEditSubmit={handleEditSubmit}
+              onRevertSubmit={handleRevertSubmit}
+              onOpenDiff={handleOpenDiff}
+              onOpenToolOutput={handleOpenToolOutput}
+            />
+          </ErrorBoundary>
+        </Profiler>
         {sessionId && <QueuedMessages sessionId={sessionId} />}
         {chat && treePanelOpen ? (
           // The selector takes the composer's slot entirely while
@@ -1448,39 +1598,43 @@ export function ChatPane({
             <ChatAuthCard />
           </ErrorBoundary>
         ) : (
-          <ErrorBoundary label="Composer">
-            <Composer
-              composerKey={composerBindingId}
-              // Stamps this composer as either the real chat id or a
-              // stable pending id so focus/draft events do not force a
-              // chat row to exist before the first send.
-              composerId={composerBindingId}
-              initialText={initialText}
-              onDraftChange={onDraftChange}
-              onSubmit={handleSubmit}
-              files={files}
-              slashCommands={slashCommands}
-              traceSubjectKey={traceSubjectKey}
-              onSlashAction={handleSlashAction}
-              locked={locked}
-              onUnlock={handleUnlock}
-              streaming={streaming}
-              onInterrupt={handleInterrupt}
-              agentConfigs={agentConfigs}
-              currentAgentConfigId={PI_AGENT_ID}
-              currentModel={currentModelValue}
-              onChangeModel={handleChangeModel}
-              currentThinkingLevel={session?.thinkingLevel ?? pendingThinkingLevel}
-              onChangeThinkingLevel={handleChangeThinking}
-            />
-          </ErrorBoundary>
+          <Profiler id="chat.composer" onRender={handleProfileRender}>
+            <ErrorBoundary label="Composer">
+              <Composer
+                composerKey={composerBindingId}
+                // Stamps this composer as either the real chat id or a
+                // stable pending id so focus/draft events do not force a
+                // chat row to exist before the first send.
+                composerId={composerBindingId}
+                initialText={initialText}
+                onDraftChange={onDraftChange}
+                onSubmit={handleSubmit}
+                files={files}
+                slashCommands={slashCommands}
+                traceSubjectKey={traceSubjectKey}
+                onSlashAction={handleSlashAction}
+                locked={locked}
+                onUnlock={handleUnlock}
+                streaming={streaming}
+                onInterrupt={handleInterrupt}
+                agentConfigs={agentConfigs}
+                currentAgentConfigId={PI_AGENT_ID}
+                currentModel={currentModelValue}
+                onChangeModel={handleChangeModel}
+                currentThinkingLevel={session?.thinkingLevel ?? pendingThinkingLevel}
+                onChangeThinkingLevel={handleChangeThinking}
+              />
+            </ErrorBoundary>
+          </Profiler>
         )}
         {/* The footer strip. Chrome is host-owned; items are
           * contributed by plugins via `meta.kind = "pi-footer.item"`.
           * The built-in `scope-info` and `chat-stats` items live in
           * the `pi-footer` plugin and reach this slot through the
           * same registration path third-party items use. */}
-        <PiFooter sessionId={sessionId} />
+        <Profiler id="chat.footer" onRender={handleProfileRender}>
+          <PiFooter sessionId={sessionId} />
+        </Profiler>
         </FileIndexContext.Provider>
       </div>
     </div>
@@ -1568,6 +1722,24 @@ function ChatEmptyState({
       {message}
     </div>
   )
+}
+
+type VisibleTraceStart = { subjectKey: string; at: number }
+
+function traceVisibleElapsedMs(
+  start: VisibleTraceStart | null,
+  subjectKey: string | null | undefined,
+): number | undefined {
+  if (!start || !subjectKey || start.subjectKey !== subjectKey) return undefined
+  return roundTraceMs(performance.now() - start.at)
+}
+
+function roundTraceMs(value: number): number {
+  return Math.round(value * 10) / 10
+}
+
+function traceError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
 function collectionTraceInfo(value: unknown): {
