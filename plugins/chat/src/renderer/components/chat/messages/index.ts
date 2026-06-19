@@ -2,6 +2,7 @@ import type { MessageComponents } from "../message-components"
 import { AgentReloaded } from "./agent-reloaded"
 import { AssistantMessage } from "./assistant-message"
 import { CloneMarker } from "./clone-marker"
+import { CompactionCard } from "./compaction-card"
 import { ErrorMessage } from "./error-message"
 import { Interrupted } from "./interrupted"
 import { Loading } from "./loading"
@@ -19,6 +20,7 @@ export const defaultMessageComponents: MessageComponents = {
   ToolCall,
   Plan,
   PermissionRequest,
+  CompactionCard,
   Loading,
   Interrupted,
   AgentReloaded,
@@ -31,6 +33,7 @@ export {
   AgentReloaded,
   AssistantMessage,
   CloneMarker,
+  CompactionCard,
   ErrorMessage,
   Interrupted,
   Loading,

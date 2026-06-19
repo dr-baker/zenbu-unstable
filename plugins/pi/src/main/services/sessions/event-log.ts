@@ -130,6 +130,33 @@ export async function appendUserPromptEvent(args: {
   })
 }
 
+type RebuildCompactionEntry = {
+  id?: string
+  type?: string
+  timestamp?: string
+  summary?: string
+  firstKeptEntryId?: string
+  details?: { readFiles?: string[]; modifiedFiles?: string[] }
+}
+
+function collectCompactionEntries(live: LiveSession): RebuildCompactionEntry[] {
+  const branch = live.pi.sessionManager.getBranch() as RebuildCompactionEntry[]
+  return branch.filter(entry => entry?.type === "compaction")
+}
+
+function matchCompactionEntry(args: {
+  compactions: RebuildCompactionEntry[]
+  msg: { summary?: string; tokensBefore?: number }
+  timestamp: number
+}): RebuildCompactionEntry | undefined {
+  const byTimestamp = args.compactions.find(entry => {
+    if (!entry.timestamp) return false
+    return new Date(entry.timestamp).getTime() === args.timestamp
+  })
+  if (byTimestamp) return byTimestamp
+  return args.compactions.find(entry => entry.summary === args.msg.summary)
+}
+
 /**
  * Replace the chat's eventLog with synthesized events that reproduce
  * the materialized message stream for pi's current branch path.
@@ -141,6 +168,7 @@ export async function rebuildEventLogFromCurrentPath(args: {
 }) {
   const { ctx, live } = args
   const messages = (live.pi as any).messages as any[] | undefined
+  const compactions = collectCompactionEntries(live)
   const events: EventItem[] = []
   let seq = 0
   if (Array.isArray(messages)) {
@@ -188,6 +216,20 @@ export async function rebuildEventLogFromCurrentPath(args: {
             toolName: msg.toolName,
             isError: !!msg.isError,
             result: msg.content,
+          },
+          timestamp: ts,
+        })
+      } else if (msg?.role === "compactionSummary") {
+        const entry = matchCompactionEntry({ compactions, msg, timestamp: ts })
+        events.push({
+          seq: ++seq,
+          kind: "compaction_summary",
+          payload: {
+            summary: msg.summary,
+            tokensBefore: msg.tokensBefore,
+            firstKeptEntryId: entry?.firstKeptEntryId,
+            readFiles: entry?.details?.readFiles,
+            modifiedFiles: entry?.details?.modifiedFiles,
           },
           timestamp: ts,
         })

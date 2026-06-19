@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import { useDbClient, useEvents } from "@zenbujs/core/react"
 import { useWindowId } from "@/lib/window-state/window-id"
 import { requestFocusComposer } from "@/lib/focus-composer"
+import { pendingChatComposerId } from "@/lib/window-state/panes/tabs"
 
 /** Cmd+L \u2014 move keyboard focus into the composer of the chat showing
  * in the active pane. The composer is a CodeMirror `EditorView`
@@ -28,8 +29,10 @@ export function useFocusActiveComposerShortcut() {
       const tab =
         pane.tabs.find(t => t.id === pane.activeTabId) ?? pane.tabs[0]
       if (!tab) return
-      if (tab.content.kind === "chat" && tab.content.chatId) {
-        requestFocusComposer(tab.content.chatId)
+      if (tab.content.kind === "chat") {
+        requestFocusComposer(
+          tab.content.chatId ?? pendingChatComposerId(tab.id),
+        )
       }
     })
     return off

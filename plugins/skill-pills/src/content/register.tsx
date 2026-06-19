@@ -8,6 +8,18 @@ type RuntimeCommand = {
   source: "extension" | "prompt" | "skill"
 }
 
+type RootLike = {
+  app?: {
+    windowStates?: Record<string, any>
+    chats?: Record<string, any>
+  }
+  pi?: {
+    sessionRuntimeSnapshots?: Record<string, {
+      capabilities?: { commands?: RuntimeCommand[] }
+    }>
+  }
+}
+
 function Registrar() {
   // The selector must return a value that `useDb`'s shallowEqual
   // snapshot cache can stabilize. Returning `{ skillNames, promptNames }`
@@ -19,8 +31,11 @@ function Registrar() {
   const commandNamesKey = useDb(root => {
     const skillNames: string[] = []
     const promptNames: string[] = []
-    for (const command of Object.values(root.pi.runtimeCommands ?? {})) {
-      const runtimeCommand = command as RuntimeCommand
+    const sessionId = resolveActiveSessionId(root as RootLike)
+    const commands = sessionId
+      ? root.pi.sessionRuntimeSnapshots[sessionId]?.capabilities.commands ?? []
+      : []
+    for (const runtimeCommand of commands as RuntimeCommand[]) {
       if (runtimeCommand.source === "skill") skillNames.push(runtimeCommand.name)
       else if (runtimeCommand.source === "prompt") promptNames.push(runtimeCommand.name)
     }
@@ -39,6 +54,41 @@ function Registrar() {
     extension,
     { kind: "cm.composer-extension", label: "Skill prompt pills" },
   )
+  return null
+}
+
+function resolveActiveSessionId(root: RootLike): string | null {
+  const windows = Object.values(root.app?.windowStates ?? {})
+  for (const ws of windows) {
+    if (!ws || ws.activeView?.kind !== "workspace") continue
+    const scopeId = ws.selectedScopeId
+    const paneState = scopeId ? ws.scopePanes?.[scopeId] : null
+    const chatId = resolveChatIdFromPaneState(paneState)
+    if (!chatId) continue
+    const chat = root.app?.chats?.[chatId]
+    if (chat?.session?.kind === "ready") return chat.session.sessionId
+  }
+  return null
+}
+
+function resolveChatIdFromPaneState(paneState: any): string | null {
+  if (!paneState) return null
+  const activePane =
+    paneState.panes?.find((p: any) => p.id === paneState.activePaneId) ??
+    paneState.panes?.[0]
+  const activeTab =
+    activePane?.tabs?.find((t: any) => t.id === activePane.activeTabId) ??
+    activePane?.tabs?.[0]
+  if (activeTab?.content?.kind === "chat" && activeTab.content.chatId) {
+    return activeTab.content.chatId
+  }
+  for (const pane of paneState.panes ?? []) {
+    const tab =
+      pane.tabs?.find((t: any) => t.id === pane.activeTabId) ?? pane.tabs?.[0]
+    if (tab?.content?.kind === "chat" && tab.content.chatId) {
+      return tab.content.chatId
+    }
+  }
   return null
 }
 

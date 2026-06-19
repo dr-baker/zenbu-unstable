@@ -199,6 +199,9 @@ export const settings = z.object({
   defaultSendMode: defaultSendMode.default("followUp"),
   /** Show the chat invariant overlay pill. */
   chatDevtools: z.boolean().default(false),
+  /** Enable renderer perf tracing for agent-readable diagnostics.
+   * Writes stay opt-in and batched via explicit/manual/slow-flow dumps. */
+  perfTrace: z.boolean().default(false),
   /** When true, the renderer's analytics service does not send any
    * data to PostHog and opts out of capture. */
   disableTelemetry: z.boolean().default(false),

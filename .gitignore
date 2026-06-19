@@ -56,3 +56,6 @@ tmp
 
 # Local Claude Code config/skills
 .claude/
+
+# Feature-flow worktrees and run artifacts
+agent_features/

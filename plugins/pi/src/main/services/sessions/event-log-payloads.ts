@@ -49,6 +49,10 @@ export function compactAgentEventForEventLogSync(
 
   if (type === "message_update") return compactMessageUpdate(raw)
 
+  if (type === "compaction_start") return compactCompactionStart(raw)
+
+  if (type === "compaction_end") return compactCompactionEnd(raw)
+
   if (type === "agent_end") {
     return omitWithDropped(raw, ["messages"])
   }
@@ -163,6 +167,76 @@ async function replaceImageDataWithBlobRefs(
     next[key] = r.value
   }
   return { value: changed ? next : value, changed }
+}
+
+function compactCompactionStart(raw: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: "compaction_start",
+    reason: raw.reason,
+  }
+}
+
+function compactCompactionEnd(raw: Record<string, unknown>): Record<string, unknown> {
+  const result = asRecord(raw.result)
+  const details = asRecord(result.details)
+  const compactResult: Record<string, unknown> = {}
+  const dropped: string[] = []
+
+  const summary = stringProp(result, "summary")
+  if (summary != null) compactResult.summary = summary
+
+  const firstKeptEntryId = stringProp(result, "firstKeptEntryId")
+  if (firstKeptEntryId != null) compactResult.firstKeptEntryId = firstKeptEntryId
+
+  const tokensBefore = numberProp(result, "tokensBefore")
+  if (tokensBefore != null) compactResult.tokensBefore = tokensBefore
+
+  const readFiles = result.readFiles
+  const modifiedFiles = result.modifiedFiles
+  if (Array.isArray(readFiles) || Array.isArray(modifiedFiles)) {
+    compactResult.details = {
+      ...(Array.isArray(readFiles) ? { readFiles } : {}),
+      ...(Array.isArray(modifiedFiles) ? { modifiedFiles } : {}),
+    }
+  } else if (Object.keys(details).length > 0) {
+    compactResult.details = {
+      ...(Array.isArray(details.readFiles) ? { readFiles: details.readFiles } : {}),
+      ...(Array.isArray(details.modifiedFiles)
+        ? { modifiedFiles: details.modifiedFiles }
+        : {}),
+    }
+  }
+
+  if (
+    Object.keys(result).some(
+      key => !["summary", "firstKeptEntryId", "tokensBefore", "details"].includes(key),
+    )
+  ) {
+    dropped.push("result.extra")
+  }
+  if (Object.keys(details).some(key => !["readFiles", "modifiedFiles"].includes(key))) {
+    dropped.push("result.details.extra")
+  }
+  if (
+    Object.keys(raw).some(
+      key =>
+        !["type", "reason", "aborted", "willRetry", "errorMessage", "result"].includes(
+          key,
+        ),
+    )
+  ) {
+    dropped.push("extra")
+  }
+
+  return {
+    type: "compaction_end",
+    reason: raw.reason,
+    aborted: raw.aborted,
+    willRetry: raw.willRetry,
+    ...(typeof raw.errorMessage === "string" ? { errorMessage: raw.errorMessage } : {}),
+    ...(Object.keys(compactResult).length > 0 ? { result: compactResult } : {}),
+    ...(dropped.length > 0 ? { dropped } : {}),
+  }
 }
 
 function compactMessageUpdate(raw: Record<string, unknown>): Record<string, unknown> {

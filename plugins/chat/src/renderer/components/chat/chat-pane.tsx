@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { ErrorBoundary } from "@/components/common/error-boundary"
 import { PiFooter } from "../pi-footer/pi-footer"
 import { FileIndexContext } from "./lib/file-index-context"
+import { perfTrace, type PerfTraceContext } from "@/lib/perf-trace"
 import { ChatAuthCard } from "@/components/auth/chat-auth-card"
 import {
   useChatBackground,
@@ -33,8 +34,18 @@ import type { Schema } from "@host/main/schema"
 import type { SelfDbSection as PiSchema } from "../../../../.zenbu/types/deps/pi/db-sections"
 
 type Chat = Schema["chats"][string]
+type PendingChatPane = {
+  scopeId: string
+  composerId: string
+}
 type Session = PiSchema["sessions"][string]
 type RegisteredSlashCommand = Schema["slashCommands"][string]
+type RuntimeCommandRow = {
+  name: string
+  description?: string
+  source: "extension" | "prompt" | "skill"
+  hint: string
+}
 type EventLogItem = {
   seq: number
   kind: string
@@ -84,6 +95,11 @@ const THINKING_LEVELS: ReadonlyArray<{
 
 export type ChatPaneProps = {
   chat: Chat | null
+  /** Unmaterialized chat tab. The app shell keeps `chatId=null`
+   * until first submit, then `createPendingChat` creates the real
+   * chat row + pi session and binds them back to the tab. */
+  pendingChat?: PendingChatPane
+  createPendingChat?: () => Promise<{ chatId: string; sessionId: string }>
   /** When false, the chat-pane rounds its left corners (no adjacent panel). */
   leftAdjacent?: boolean
   /** When true, another panel sits flush below (e.g. terminal). Kept on the
@@ -99,14 +115,18 @@ export type ChatPaneProps = {
    * Drops the top border + top corner rounding so the bar above owns
    * the top edge of the frame instead. */
   topAdjacent?: boolean
+  traceContext?: PerfTraceContext
 }
 
 export function ChatPane({
   chat,
+  pendingChat,
+  createPendingChat,
   leftAdjacent = false,
   bottomAdjacent = false,
   rightAdjacent = false,
   topAdjacent = false,
+  traceContext,
 }: ChatPaneProps) {
   const windowId = useWindowId()
   const rpc = useRpc()
@@ -120,6 +140,54 @@ export function ChatPane({
 
   const sessionId =
     chat?.session.kind === "ready" ? chat.session.sessionId : null
+  const effectiveScopeId = chat?.scopeId ?? pendingChat?.scopeId ?? null
+  const composerBindingId = chat?.id ?? pendingChat?.composerId ?? ""
+  const canCompose = chat != null || pendingChat != null
+  const [pendingModelValue, setPendingModelValue] = useState<string | undefined>(undefined)
+  const [pendingThinkingLevel, setPendingThinkingLevel] =
+    useState<Session["thinkingLevel"]>("medium")
+  const traceSubjectKey = traceContext?.visible === false ? null : traceContext?.subjectKey ?? null
+
+  useEffect(() => {
+    if (!traceSubjectKey) return
+    perfTrace.ensureFlow(
+      "chat.open",
+      {
+        source: traceContext?.source ?? "chat-pane",
+        chatId: chat?.id ?? null,
+        sessionId,
+        scopeId: effectiveScopeId,
+        pending: chat == null && pendingChat != null,
+        composerId: composerBindingId,
+        ...(traceContext?.args ?? {}),
+      },
+      { subjectKey: traceSubjectKey },
+    )
+    perfTrace.markForSubject(traceSubjectKey, "chat.pane.mounted", {
+      chatId: chat?.id ?? null,
+      sessionId,
+      scopeId: effectiveScopeId,
+      pending: chat == null && pendingChat != null,
+      canCompose,
+    })
+    const frame = window.requestAnimationFrame(() => {
+      perfTrace.markForSubject(traceSubjectKey, "chat.pane.first_frame", {
+        chatId: chat?.id ?? null,
+        sessionId,
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    traceSubjectKey,
+    traceContext?.source,
+    traceContext?.args,
+    chat,
+    pendingChat,
+    sessionId,
+    effectiveScopeId,
+    composerBindingId,
+    canCompose,
+  ])
 
   useEffect(() => {
     return () => {
@@ -131,15 +199,24 @@ export function ChatPane({
   useEffect(() => {
     if (!sessionId) return
     const subscriberId = `window-${windowId}-${sessionId}`
-    rpc.pi.sessions
-      .subscribe({ sessionId, subscriberId })
+    perfTrace.markForSubject(traceSubjectKey, "chat.session.subscribe_requested", {
+      sessionId,
+      subscriberId,
+    })
+    void perfTrace
+      .asyncSpanForSubject(
+        traceSubjectKey,
+        "chat.session.subscribe",
+        () => rpc.pi.sessions.subscribe({ sessionId, subscriberId }),
+        { sessionId, subscriberId },
+      )
       .catch(err => console.error("[chat] subscribe failed:", err))
     return () => {
       rpc.pi.sessions
         .unsubscribe({ sessionId, subscriberId })
         .catch(err => console.error("[chat] unsubscribe failed:", err))
     }
-  }, [sessionId, windowId, rpc])
+  }, [sessionId, windowId, rpc, traceSubjectKey])
 
   const background = useChatBackground()
   const backgroundUrl = useChatBackgroundUrl(background)
@@ -150,6 +227,7 @@ export function ChatPane({
   const eventLogRef = useDb(root =>
     sessionId ? root.pi.sessions[sessionId]?.eventLog : undefined,
   )
+  const eventLogTrace = collectionTraceInfo(eventLogRef)
   const { items: events } = useCollection(eventLogRef)
   const models = useDb(root => root.pi.models)
 
@@ -157,20 +235,79 @@ export function ChatPane({
   // a collection so indexing doesn't bloat root.json; useCollection
   // streams them in as the service publishes chunks.
   const filePathsRef = useDb(root =>
-    chat ? root.app.fileTreeIndexes[chat.scopeId]?.paths : undefined,
+    effectiveScopeId ? root.app.fileTreeIndexes[effectiveScopeId]?.paths : undefined,
   )
+  const filePathsTrace = collectionTraceInfo(filePathsRef)
   const { items: filePathItems } = useCollection(filePathsRef)
   const filePaths = useMemo(
-    () => filePathItems.map(item => item.path),
-    [filePathItems],
+    () =>
+      perfTrace.spanForSubject(
+        traceSubjectKey,
+        "chat.file_paths.map",
+        () => filePathItems.map(item => item.path),
+        { itemCount: filePathItems.length, collectionId: filePathsTrace.id },
+      ),
+    [filePathItems, traceSubjectKey, filePathsTrace.id],
   )
+
+  const lastEventLogTraceRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!traceSubjectKey || !eventLogTrace.id) return
+    const key = `${traceSubjectKey}:${eventLogTrace.id}`
+    if (lastEventLogTraceRef.current === key) return
+    lastEventLogTraceRef.current = key
+    perfTrace.markForSubject(traceSubjectKey, "chat.event_log.ref_ready", {
+      collectionId: eventLogTrace.id,
+      debugName: eventLogTrace.debugName,
+      sessionId,
+    })
+  }, [traceSubjectKey, eventLogTrace.id, eventLogTrace.debugName, sessionId])
+
+  const lastEventItemsTraceRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!traceSubjectKey || events.length === 0) return
+    const key = `${traceSubjectKey}:${eventLogTrace.id}:first-items`
+    if (lastEventItemsTraceRef.current === key) return
+    lastEventItemsTraceRef.current = key
+    perfTrace.markForSubject(traceSubjectKey, "chat.event_log.first_items", {
+      collectionId: eventLogTrace.id,
+      itemCount: events.length,
+      lastSeq: events.at(-1)?.seq,
+    })
+  }, [traceSubjectKey, eventLogTrace.id, events])
+
+  const lastFilePathsTraceRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!traceSubjectKey || !filePathsTrace.id) return
+    const key = `${traceSubjectKey}:${filePathsTrace.id}`
+    if (lastFilePathsTraceRef.current === key) return
+    lastFilePathsTraceRef.current = key
+    perfTrace.markForSubject(traceSubjectKey, "chat.file_paths.ref_ready", {
+      collectionId: filePathsTrace.id,
+      debugName: filePathsTrace.debugName,
+      scopeId: effectiveScopeId,
+    })
+  }, [traceSubjectKey, filePathsTrace.id, filePathsTrace.debugName, effectiveScopeId])
+
+  const lastFilePathItemsTraceRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!traceSubjectKey || filePathItems.length === 0) return
+    const key = `${traceSubjectKey}:${filePathsTrace.id}:first-items`
+    if (lastFilePathItemsTraceRef.current === key) return
+    lastFilePathItemsTraceRef.current = key
+    perfTrace.markForSubject(traceSubjectKey, "chat.file_paths.first_items", {
+      collectionId: filePathsTrace.id,
+      itemCount: filePathItems.length,
+    })
+  }, [traceSubjectKey, filePathsTrace.id, filePathItems.length])
+
   // Worktree directory the chat is anchored at. Threaded through
   // `materializeMessages` so the post-turn summary card knows which
   // `directory` to forward when it opens a `git-diff` split, and so
   // it can strip the absolute-path prefix off edit-tool args (most
   // tools record `file_path` as an absolute path).
   const chatDirectory = useDb(root =>
-    chat ? root.app.scopes[chat.scopeId]?.directory ?? null : null,
+    effectiveScopeId ? root.app.scopes[effectiveScopeId]?.directory ?? null : null,
   )
   // Extra worktree directories the scope has access to. Edits to
   // files inside any of these need to route through *that* dir
@@ -180,7 +317,7 @@ export function ChatPane({
   // Threaded into `materializeMessages` so the turn-summary card
   // can stamp each file row with its owning directory.
   const chatExtraDirectories = useDb(root =>
-    chat ? root.app.scopes[chat.scopeId]?.extraDirectories ?? [] : [],
+    effectiveScopeId ? root.app.scopes[effectiveScopeId]?.extraDirectories ?? [] : [],
   )
   // Workspace + scope the chat owns. Threaded through to the
   // turn-summary card so clicking a file opens the diff in *this*
@@ -189,23 +326,30 @@ export function ChatPane({
   // shell falls back to `activeWorkspaceIdOf(ws)` and the diff can
   // end up in a sibling workspace's pane state — silently teleporting
   // the user there.
-  const chatScopeId = chat?.scopeId ?? null
+  const chatScopeId = effectiveScopeId
   const chatWorkspaceId = useDb(root =>
-    chat ? root.app.scopes[chat.scopeId]?.workspaceId ?? null : null,
+    effectiveScopeId ? root.app.scopes[effectiveScopeId]?.workspaceId ?? null : null,
   )
   const files = useMemo<FileEntry[]>(() => {
-    if (!filePaths) return []
-    const out: FileEntry[] = new Array(filePaths.length)
-    for (let i = 0; i < filePaths.length; i++) {
-      const p = filePaths[i]!
-      const slash = p.lastIndexOf("/")
-      out[i] = { path: p, name: slash >= 0 ? p.slice(slash + 1) : p }
-    }
-    return out
-  }, [filePaths])
+    return perfTrace.spanForSubject(
+      traceSubjectKey,
+      "chat.file_entries.derive",
+      () => {
+        if (!filePaths) return []
+        const out: FileEntry[] = new Array(filePaths.length)
+        for (let i = 0; i < filePaths.length; i++) {
+          const p = filePaths[i]!
+          const slash = p.lastIndexOf("/")
+          out[i] = { path: p, name: slash >= 0 ? p.slice(slash + 1) : p }
+        }
+        return out
+      },
+      { pathCount: filePaths.length },
+    )
+  }, [filePaths, traceSubjectKey])
 
   const currentModelValue =
-    session?.model ? `${session.model.provider}/${session.model.id}` : undefined
+    session?.model ? `${session.model.provider}/${session.model.id}` : pendingModelValue
   const currentModel: PiSchema["models"][string] | undefined =
     currentModelValue ? models[currentModelValue] : undefined
 
@@ -243,7 +387,7 @@ export function ChatPane({
   // and shows a lock icon in place of the interrupt button. Stored in
   // the DB so it survives reloads and follows the chat as you switch.
   const locked = useDb(root =>
-    chat ? root.app.chatStates[chat.id]?.locked ?? false : false,
+    composerBindingId ? root.app.chatStates[composerBindingId]?.locked ?? false : false,
   )
 
   // What the plain Enter key does while streaming: queue (followUp)
@@ -253,6 +397,60 @@ export function ChatPane({
   const defaultSendMode = useDb(root => root.app.settings.defaultSendMode)
   const showChatDevtools = useDb(root => root.app.settings.chatDevtools)
   const registeredSlashCommands = useDb(root => root.app.slashCommands)
+  const staleActivationKey = useDb(root => {
+    if (!sessionId) return null
+    const snapshot = root.pi.sessionRuntimeSnapshots[sessionId]
+    if (!snapshot?.active || !snapshot.activationHashAtLoad) return null
+    const currentActivationHash =
+      root.pi.piResourceStaticCatalogs[snapshot.scopeId]?.metadata.activationHash
+    if (!currentActivationHash) return null
+    if (snapshot.activationHashAtLoad === currentActivationHash) return null
+    return `${sessionId}:${snapshot.activationHashAtLoad}:${currentActivationHash}`
+  })
+  const runtimeCommandsKey = useDb(root => {
+    if (!sessionId) return "[]"
+    const snapshot = root.pi.sessionRuntimeSnapshots[sessionId]
+    if (!snapshot) return "[]"
+    const rows: RuntimeCommandRow[] = snapshot.capabilities.commands.map(command => {
+      const resource = command.resourceId
+        ? snapshot.resources.find(entry => entry.resourceId === command.resourceId)
+        : null
+      const definition = command.resourceId
+        ? root.pi.piResourceDefinitions[command.resourceId]
+        : null
+      return {
+        name: command.name,
+        description: command.description,
+        source: command.source,
+        hint: runtimeCommandHint({
+          source: command.source,
+          resourceLabel: definition?.label ?? null,
+          tier: resource?.tier ?? null,
+          sourceInfo: command.sourceInfo,
+        }),
+      }
+    })
+    rows.sort((a, b) =>
+      runtimeCommandRank(a.source) - runtimeCommandRank(b.source) ||
+      a.name.localeCompare(b.name),
+    )
+    return JSON.stringify(rows)
+  })
+  const runtimeCommandRows = useMemo<RuntimeCommandRow[]>(() => {
+    try {
+      return JSON.parse(runtimeCommandsKey) as RuntimeCommandRow[]
+    } catch {
+      return []
+    }
+  }, [runtimeCommandsKey])
+
+  useEffect(() => {
+    if (!sessionId || !staleActivationKey) return
+    toast.warning("Pi resources changed", {
+      id: `pi-resource-stale:${sessionId}`,
+      description: "Reload this session to use the current Pi extensions, skills, prompts, and themes.",
+    })
+  }, [sessionId, staleActivationKey])
 
   // The slash menu lists:
   //   - `/queue` and `/steer`: send the current input with that
@@ -263,7 +461,18 @@ export function ChatPane({
   //     the user pick the no-op.
   //   - exactly one of `/lock` or `/unlock`, same idea.
   const slashCommands = useMemo<SlashCommand[]>(() => {
+    const runtimeCmds: SlashCommand[] = runtimeCommandRows.map(cmd => ({
+      id: `pi-runtime:${encodeURIComponent(cmd.name)}`,
+      label: cmd.name,
+      description: cmd.description ?? undefined,
+      group: runtimeCommandGroup(cmd.source),
+      hint: cmd.hint,
+      action: `pi-runtime:${encodeURIComponent(cmd.name)}`,
+      completionText: `/${cmd.name}`,
+    }))
+    const runtimeNames = new Set(runtimeCommandRows.map(cmd => cmd.name))
     const registeredCmds: SlashCommand[] = Object.values(registeredSlashCommands)
+      .filter(cmd => !runtimeNames.has(cmd.name))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(cmd => ({
         id: `registered:${cmd.id}`,
@@ -276,7 +485,7 @@ export function ChatPane({
         completionText: `/${cmd.name}`,
       }))
     const hasRegistered = (name: string) =>
-      Object.values(registeredSlashCommands).some(cmd => cmd.name === name)
+      runtimeNames.has(name) || Object.values(registeredSlashCommands).some(cmd => cmd.name === name)
 
     const sendCmds: SlashCommand[] = [
       {
@@ -349,6 +558,7 @@ export function ChatPane({
     }
     return [
       ...sendCmds,
+      ...runtimeCmds,
       ...registeredCmds,
       workspaceCmd,
       handoffCmd,
@@ -356,7 +566,7 @@ export function ChatPane({
       defaultCmd,
       lockCmd,
     ]
-  }, [locked, defaultSendMode, registeredSlashCommands])
+  }, [locked, defaultSendMode, runtimeCommandRows, registeredSlashCommands])
 
   // Panel state for slash commands that take over the composer
   // slot. `/tree` and `/fork` share the same component with
@@ -427,8 +637,11 @@ export function ChatPane({
     command: RegisteredSlashCommand
     text: string
     argsText: string
+    chatId?: string | null
+    sessionId?: string | null
   }) => {
-    if (!chat) return
+    const targetChatId = args.chatId ?? chat?.id ?? null
+    if (!targetChatId) return
     type DynamicRpc = Record<
       string,
       Record<string, Record<string, (payload: Record<string, unknown>) => Promise<unknown>>>
@@ -445,8 +658,8 @@ export function ChatPane({
     try {
       const result = await fn({
         windowId,
-        chatId: chat.id,
-        sessionId,
+        chatId: targetChatId,
+        sessionId: args.sessionId ?? sessionId,
         command: args.command.name,
         text: args.text,
         argsText: args.argsText,
@@ -462,7 +675,16 @@ export function ChatPane({
   }
 
   const handleSlashAction = (action: string) => {
-    if (!chat) return
+    if (!composerBindingId) return
+    if (action.startsWith("pi-runtime:")) {
+      if (!sessionId) return
+      const name = decodeURIComponent(action.slice("pi-runtime:".length))
+      void rpc.pi.sessions.runRuntimeCommand({
+        sessionId,
+        text: `/${name}`,
+      })
+      return
+    }
     if (action.startsWith("registered:")) {
       const id = action.slice("registered:".length)
       const command = registeredSlashCommands[id]
@@ -512,16 +734,16 @@ export function ChatPane({
       // Direct replica update — see project rule on preferring replica
       // writes over RPC for instant feedback.
       dbClient.update(root => {
-        const prev = root.app.chatStates[chat.id]
-        root.app.chatStates[chat.id] = {
-          chatId: chat.id,
+        const prev = root.app.chatStates[composerBindingId]
+        root.app.chatStates[composerBindingId] = {
+          chatId: composerBindingId,
           locked: true,
           draft: prev?.draft ?? "",
         }
       })
     } else if (action === "unlock") {
       dbClient.update(root => {
-        const existing = root.app.chatStates[chat.id]
+        const existing = root.app.chatStates[composerBindingId]
         if (existing) existing.locked = false
       })
     } else if (action === "set-default-steer") {
@@ -536,28 +758,41 @@ export function ChatPane({
   }
 
   const handleUnlock = () => {
-    if (!chat) return
+    if (!composerBindingId) return
     dbClient.update(root => {
-      const existing = root.app.chatStates[chat.id]
+      const existing = root.app.chatStates[composerBindingId]
       if (existing) existing.locked = false
     })
   }
 
   const messages = useMemo(() => {
     if (!session) return []
-    return materializeMessages(events, {
-      directory: chatDirectory,
-      extraDirectories: chatExtraDirectories,
-      workspaceId: chatWorkspaceId,
-      scopeId: chatScopeId,
-    })
+    return perfTrace.spanForSubject(
+      traceSubjectKey,
+      "chat.messages.materialize",
+      () =>
+        materializeMessages(events, {
+          directory: chatDirectory,
+          extraDirectories: chatExtraDirectories,
+          workspaceId: chatWorkspaceId,
+          scopeId: chatScopeId,
+        }),
+      {
+        eventCount: events.length,
+        sessionId,
+        workspaceId: chatWorkspaceId,
+        scopeId: chatScopeId,
+      },
+    )
   }, [
     events,
     session,
+    sessionId,
     chatDirectory,
     chatExtraDirectories,
     chatWorkspaceId,
     chatScopeId,
+    traceSubjectKey,
   ])
 
   // Detector for the "sent a message, it didn't render" class of
@@ -611,11 +846,11 @@ export function ChatPane({
     return { startTimestamp, tokens }
   }, [messages, cumulativeContextTokens, baselineContextTokens])
 
-  // Per-chat draft persistence. Returns "" + no-op handlers when
-  // there's no chat yet (pre-empty-state); the hook itself guards
-  // against writes to an empty chatId.
+  // Per-composer draft persistence. Real chats use their chat id;
+  // unmaterialized tabs use a stable pending composer id so a draft
+  // can survive tab switches without creating a chat row.
   const { initialText, onDraftChange, flushDraft } = useChatDraft(
-    chat?.id ?? "",
+    composerBindingId,
   )
 
   const cornerClass = cornerRoundingClass({
@@ -638,7 +873,7 @@ export function ChatPane({
     .filter(Boolean)
     .join(" ")
 
-  if (!chat) {
+  if (!canCompose) {
     return (
       <ChatEmptyState
         message="No chat selected."
@@ -648,7 +883,7 @@ export function ChatPane({
     )
   }
 
-  const isReady = chat.session.kind === "ready" && !!session
+  const isReady = chat?.session.kind === "ready" && !!session
   const streaming = isReady ? session.isStreaming : false
   const displayMessages = isReady
     ? messages
@@ -679,8 +914,48 @@ export function ChatPane({
       }) ?? null
   }
 
+  const applyPendingRuntimeConfig = async (targetSessionId: string) => {
+    if (pendingModelValue) {
+      const slash = pendingModelValue.indexOf("/")
+      if (slash >= 0) {
+        await rpc.pi.sessions.setModel({
+          sessionId: targetSessionId,
+          provider: pendingModelValue.slice(0, slash),
+          id: pendingModelValue.slice(slash + 1),
+        })
+      }
+    }
+    await rpc.pi.sessions.setThinkingLevel({
+      sessionId: targetSessionId,
+      level: pendingThinkingLevel,
+    })
+  }
+
   const handleSubmit = async (payload: ComposerSubmitPayload) => {
-    if (!isReady || !sessionId) return
+    let targetChatId = chat?.id ?? null
+    let targetSessionId = sessionId
+    let targetSession = session
+
+    if (!targetSessionId) {
+      if (!createPendingChat) return
+      try {
+        const created = await perfTrace.asyncSpanForSubject(
+          traceSubjectKey,
+          "chat.pending.create",
+          () => createPendingChat(),
+          { scopeId: pendingChat?.scopeId, composerId: pendingChat?.composerId },
+        )
+        targetChatId = created.chatId
+        targetSessionId = created.sessionId
+        await applyPendingRuntimeConfig(created.sessionId)
+        targetSession = dbClient.readRoot().pi.sessions[created.sessionId]
+      } catch (err) {
+        console.error("[chat] create pending chat failed:", err)
+        return
+      }
+    }
+    if (!targetSessionId) return
+
     const slashText = payload.text.trim()
     if (slashText.startsWith("/")) {
       const withoutSlash = slashText.slice(1)
@@ -695,6 +970,8 @@ export function ChatPane({
           command: registered,
           text: slashText,
           argsText: firstSpace < 0 ? "" : withoutSlash.slice(firstSpace + 1),
+          chatId: targetChatId,
+          sessionId: targetSessionId,
         })
         return
       }
@@ -706,17 +983,27 @@ export function ChatPane({
     // user-message bubble (and queue-draft entry) actually persist,
     // so matching against `events`/`queueDraft` works.
     const trackedText = payload.displayText ?? payload.text
-    if (!session.isStreaming) {
+    if (!targetSession?.isStreaming) {
       deliveryInvariant.track(trackedText, "prompt")
       armAutoScrollOnNextUserPrompt()
       try {
-        await rpc.pi.sessions.prompt({
-          sessionId,
-          text: payload.text,
-          displayText: payload.displayText,
-          images: payload.images,
-          imageRefs: payload.imageRefs,
-        })
+        await perfTrace.asyncSpanForSubject(
+          traceSubjectKey,
+          "chat.prompt.rpc",
+          () =>
+            rpc.pi.sessions.prompt({
+              sessionId: targetSessionId,
+              text: payload.text,
+              displayText: payload.displayText,
+              images: payload.images,
+              imageRefs: payload.imageRefs,
+            }),
+          {
+            sessionId: targetSessionId,
+            textLength: payload.text.length,
+            imageCount: payload.images.length,
+          },
+        )
       } catch (err) {
         autoScrollTapCleanupRef.current?.()
         autoScrollTapCleanupRef.current = null
@@ -732,14 +1019,25 @@ export function ChatPane({
         : defaultSendMode
     deliveryInvariant.track(trackedText, "enqueue")
     try {
-      await rpc.pi.sessions.enqueue({
-        sessionId,
-        text: payload.text,
-        displayText: payload.displayText,
-        images: payload.images,
-        imageRefs: payload.imageRefs,
-        kind,
-      })
+      await perfTrace.asyncSpanForSubject(
+        traceSubjectKey,
+        "chat.enqueue.rpc",
+        () =>
+          rpc.pi.sessions.enqueue({
+            sessionId: targetSessionId,
+            text: payload.text,
+            displayText: payload.displayText,
+            images: payload.images,
+            imageRefs: payload.imageRefs,
+            kind,
+          }),
+        {
+          sessionId: targetSessionId,
+          textLength: payload.text.length,
+          imageCount: payload.images.length,
+          kind,
+        },
+      )
     } catch (err) {
       console.error("[chat] enqueue failed:", err)
     }
@@ -989,9 +1287,13 @@ export function ChatPane({
   }
 
   const handleChangeModel = async (value: string) => {
-    if (!isReady || !sessionId) return
     const slash = value.indexOf("/")
     if (slash < 0) return
+    if (!sessionId) {
+      setPendingModelValue(value)
+      return
+    }
+    if (!isReady) return
     const provider = value.slice(0, slash)
     const id = value.slice(slash + 1)
     try {
@@ -1002,11 +1304,16 @@ export function ChatPane({
   }
 
   const handleChangeThinking = async (value: string) => {
-    if (!isReady || !sessionId) return
+    const level = value as Session["thinkingLevel"]
+    if (!sessionId) {
+      setPendingThinkingLevel(level)
+      return
+    }
+    if (!isReady) return
     try {
       await rpc.pi.sessions.setThinkingLevel({
         sessionId,
-        level: value as Session["thinkingLevel"],
+        level,
       })
     } catch (err) {
       console.error("[chat] setThinkingLevel failed:", err)
@@ -1026,7 +1333,7 @@ export function ChatPane({
       )}
     >
       <ChatBackgroundLayer url={backgroundUrl} opacity={background?.opacity} />
-      {showChatDevtools ? <InvariantOverlay chatId={chat.id} /> : null}
+      {showChatDevtools && chat ? <InvariantOverlay chatId={chat.id} /> : null}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col">
         <FileIndexContext.Provider value={files}>
         {/* Only render the chat's own title bar when nothing sits
@@ -1036,7 +1343,7 @@ export function ChatPane({
          * `topAdjacent` is false is the single-tab / no-split pane in
          * the main app, which is exactly where the title bar's
          * "what am I looking at?" affordance is missing today. */}
-        {!topAdjacent ? (
+        {!topAdjacent && chat ? (
           <ChatTitleBar
             chat={chat}
             sessionId={sessionId}
@@ -1048,6 +1355,7 @@ export function ChatPane({
             messages={displayMessages}
             streaming={streaming}
             loadingStats={loadingStats}
+            traceSubjectKey={traceSubjectKey}
             scrollToBottomRef={scrollToBottomRef}
             onHasOverflowChange={setChatHasOverflow}
             onEditSubmit={handleEditSubmit}
@@ -1142,17 +1450,17 @@ export function ChatPane({
         ) : (
           <ErrorBoundary label="Composer">
             <Composer
-              composerKey={chat.id}
-              // Stamps this composer as `chat.id` so the bubble-side
-              // revert flow can target it with an
-              // `appendComposerDraft` event without clobbering live
-              // drafts in other chats.
-              composerId={chat.id}
+              composerKey={composerBindingId}
+              // Stamps this composer as either the real chat id or a
+              // stable pending id so focus/draft events do not force a
+              // chat row to exist before the first send.
+              composerId={composerBindingId}
               initialText={initialText}
               onDraftChange={onDraftChange}
               onSubmit={handleSubmit}
               files={files}
               slashCommands={slashCommands}
+              traceSubjectKey={traceSubjectKey}
               onSlashAction={handleSlashAction}
               locked={locked}
               onUnlock={handleUnlock}
@@ -1162,7 +1470,7 @@ export function ChatPane({
               currentAgentConfigId={PI_AGENT_ID}
               currentModel={currentModelValue}
               onChangeModel={handleChangeModel}
-              currentThinkingLevel={session?.thinkingLevel}
+              currentThinkingLevel={session?.thinkingLevel ?? pendingThinkingLevel}
               onChangeThinkingLevel={handleChangeThinking}
             />
           </ErrorBoundary>
@@ -1177,6 +1485,44 @@ export function ChatPane({
       </div>
     </div>
   )
+}
+
+function runtimeCommandRank(source: RuntimeCommandRow["source"]): number {
+  switch (source) {
+    case "extension":
+      return 0
+    case "prompt":
+      return 1
+    case "skill":
+      return 2
+  }
+}
+
+function runtimeCommandGroup(source: RuntimeCommandRow["source"]): string {
+  switch (source) {
+    case "extension":
+      return "Pi Extensions"
+    case "prompt":
+      return "Pi Prompts"
+    case "skill":
+      return "Pi Skills"
+  }
+}
+
+function runtimeCommandHint(args: {
+  source: RuntimeCommandRow["source"]
+  resourceLabel: string | null
+  tier: string | null
+  sourceInfo: { scope?: string; origin?: string; source?: string; path?: string } | null
+}): string {
+  const kind = args.source === "extension" ? "extension" : args.source
+  if (args.resourceLabel) return `${kind} · ${args.resourceLabel}`
+  if (args.tier) return `${kind} · ${args.tier.replace(/^pi-/, "")}`
+  const provenance =
+    args.sourceInfo?.origin === "package"
+      ? "package"
+      : args.sourceInfo?.scope ?? args.sourceInfo?.source ?? null
+  return provenance ? `${kind} · ${provenance}` : kind
 }
 
 function ChatBackgroundLayer({
@@ -1222,6 +1568,18 @@ function ChatEmptyState({
       {message}
     </div>
   )
+}
+
+function collectionTraceInfo(value: unknown): {
+  id: string | null
+  debugName?: string
+} {
+  if (value == null || typeof value !== "object") return { id: null }
+  const ref = value as { collectionId?: unknown; debugName?: unknown }
+  return {
+    id: typeof ref.collectionId === "string" ? ref.collectionId : null,
+    debugName: typeof ref.debugName === "string" ? ref.debugName : undefined,
+  }
 }
 
 function cornerRoundingClass(_args: {

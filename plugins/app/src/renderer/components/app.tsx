@@ -7,6 +7,9 @@ import { useAnalyticsSync } from "@/lib/analytics";
 import { useWindowId } from "@/lib/window-state/window-id";
 import { useActiveView, useShowOnboardingView } from "@/lib/window-state/active-view";
 import { selectWorkspaceInRoot } from "@/lib/window-state/selection";
+import { useSidebarTabSync } from "@/lib/window-state/sidebar-tab-sync";
+import { perfTrace } from "@/lib/perf-trace";
+import { PerfTraceRpcBridge } from "./perf-trace-rpc-bridge";
 /**
  * we don't really need to lazy load this, can remove
  */
@@ -59,6 +62,16 @@ function AppReadyMarker() {
   return null
 }
 
+function PerfTraceSettingsSync() {
+  const enabled = useDb(
+    root => (root.app.settings as { perfTrace?: boolean }).perfTrace ?? false,
+  )
+  useEffect(() => {
+    if (enabled) perfTrace.enable()
+  }, [enabled])
+  return null
+}
+
 /**
  * Read the `?route=<injection>` URL param the framework's
  * `WindowService.openWindow({ injection })` stamps into sub-window
@@ -76,12 +89,15 @@ function useRoute(): string | null {
 export function App() {
   markAppReady("app-function-entered")
   const route = useRoute()
+  useSidebarTabSync()
   if (route) {
     // Sub-window: defer entirely to the injection. The injection
     // ships its own chrome (title bar, modals, etc.) so the host
     // doesn't try to wrap it with workspace UI it doesn't want.
     return (
       <TooltipProvider>
+        <PerfTraceRpcBridge />
+        <PerfTraceSettingsSync />
         <View name={route} args={{}} />
         <Suspense fallback={null}>
           <NotifyListener />
@@ -111,6 +127,8 @@ export function App() {
 
   return (
     <TooltipProvider>
+      <PerfTraceRpcBridge />
+      <PerfTraceSettingsSync />
       <div className="flex h-full flex-col ">
         <div className="min-h-0 flex-1">
           <WorkspaceShell />

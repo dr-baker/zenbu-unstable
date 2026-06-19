@@ -3,6 +3,7 @@ import { useDbClient, useEvents } from "@zenbujs/core/react"
 import { useWindowId } from "@/lib/window-state/window-id"
 import { useActiveScopeId } from "@/lib/window-state/active-view"
 import { requestFocusComposer } from "@/lib/focus-composer"
+import { pendingChatComposerId } from "@/lib/window-state/panes/tabs"
 
 /** Cmd+Shift+[ / Cmd+Shift+] — cycle the active tab in the active
  * pane. Mirrors macOS-native tab navigation (Safari, Chrome, Finder,
@@ -21,7 +22,7 @@ export function useNavigateTabsShortcut() {
       const scopeId = activeScopeId
       if (!scopeId) return
       void (async () => {
-        let targetChatId: string | null = null
+        let targetComposerId: string | null = null
         await dbClient.update(root => {
           const state = root.app.windowStates[windowId]?.scopePanes?.[scopeId]
           if (!state) return
@@ -35,12 +36,13 @@ export function useNavigateTabsShortcut() {
           const nextTab = pane.tabs[nextIdx]
           if (!nextTab) return
           pane.activeTabId = nextTab.id
-          if (nextTab.content.kind === "chat" && nextTab.content.chatId) {
-            targetChatId = nextTab.content.chatId
+          if (nextTab.content.kind === "chat") {
+            targetComposerId =
+              nextTab.content.chatId ?? pendingChatComposerId(nextTab.id)
           }
         })
-        if (targetChatId) {
-          requestFocusComposer(targetChatId)
+        if (targetComposerId) {
+          requestFocusComposer(targetComposerId)
         }
       })()
     })

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Strip Cursor/agent attribution trailers injected by tooling.
+msg_file="$1"
+tmp="$(mktemp)"
+grep -Ev '^(Co-authored-by: Cursor <cursoragent@cursor.com>|Made-with: Cursor)$' "$msg_file" >"$tmp"
+mv "$tmp" "$msg_file"

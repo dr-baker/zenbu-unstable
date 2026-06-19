@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import type { MaterializedMessage } from "./lib/materialized-message"
 import { useAutoScroll, type ScrollSnapshot } from "./lib/use-auto-scroll"
 import type { MessageComponents } from "./message-components"
+import { perfTrace } from "@/lib/perf-trace"
 
 export type ScrollMetrics = {
   scrollTop: number
@@ -40,6 +41,7 @@ export type MessageListProps = {
    * is true; chat-pane computes it from `session.stats` and
    * `session.runStartTokens`. */
   loadingStats: LoadingStats
+  traceSubjectKey?: string | null
   components: MessageComponents
   onScrollMetrics?: (metrics: ScrollMetrics) => void
   hasMoreAbove?: boolean
@@ -103,6 +105,8 @@ function getMessageKey(msg: MaterializedMessage, index: number): string {
       return `perm-${msg.requestId}`
     case "plan":
       return `plan-${index}`
+    case "compaction":
+      return `compaction-${msg.timestamp}-${index}`
     case "turn_summary":
       return `turn-${index}`
     case "interrupted":
@@ -122,6 +126,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
       messages,
       loading,
       loadingStats,
+      traceSubjectKey,
       components: C,
       onScrollMetrics,
       hasMoreAbove,
@@ -243,9 +248,25 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
       if (messages.length === 0) return
       const el = autoScroll.getScrollElement()
       if (!el) return
-      el.scrollTop = el.scrollHeight
+      perfTrace.spanForSubject(
+        traceSubjectKey,
+        "chat.message_list.initial_scroll",
+        () => {
+          el.scrollTop = el.scrollHeight
+        },
+        {
+          messageCount: messages.length,
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+        },
+      )
       initialScrollDoneRef.current = true
-    }, [messages.length, autoScroll])
+      perfTrace.markForSubject(traceSubjectKey, "chat.message_list.ready", {
+        messageCount: messages.length,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+      })
+    }, [messages.length, autoScroll, traceSubjectKey])
 
     useLayoutEffect(() => {
       const snapshot = pendingSnapshotRef.current
@@ -438,6 +459,22 @@ function MessageRow({
           onSelect={optionId =>
             onPermissionSelect?.(message.requestId, optionId)
           }
+        />
+      )
+    case "compaction":
+      return (
+        <C.CompactionCard
+          status={message.status}
+          reason={message.reason}
+          timestamp={message.timestamp}
+          historical={message.historical}
+          tokensBefore={message.tokensBefore}
+          willRetry={message.willRetry}
+          errorMessage={message.errorMessage}
+          summary={message.summary}
+          firstKeptEntryId={message.firstKeptEntryId}
+          readFiles={message.readFiles}
+          modifiedFiles={message.modifiedFiles}
         />
       )
     case "interrupted":

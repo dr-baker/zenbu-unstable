@@ -26,6 +26,7 @@ import { rankEntries } from "./lib/fuzzy"
 import { getImageBytes } from "./lib/image-cache"
 import { downscaleImage } from "./lib/downscale-image"
 import type { ComposerIntent, FileEntry, SlashCommand } from "./types"
+import { perfTrace } from "@/lib/perf-trace"
 
 export type ComposerSubmitPayload = {
   /** Final wire text shipped to the model. File pills are inlined as
@@ -115,6 +116,7 @@ export type ComposerProps = {
    * This keeps the input surface extensible without hard-coding
    * plugin behavior into the host composer. */
   codeMirrorExtensions?: readonly Extension[]
+  traceSubjectKey?: string | null
 }
 
 const DEFAULT_PLACEHOLDER = "/ for commands, @ for context"
@@ -331,6 +333,7 @@ export function Composer({
   composerId,
   selectAllOnMount,
   codeMirrorExtensions = [],
+  traceSubjectKey,
 }: ComposerProps) {
   // Plugin-contributed CodeMirror extensions, sourced from the
   // renderer function registry. Two kinds:
@@ -384,6 +387,8 @@ export function Composer({
   selectAllOnMountRef.current = selectAllOnMount
   const codeMirrorExtensionsRef = useRef(mergedContributed)
   codeMirrorExtensionsRef.current = mergedContributed
+  const traceSubjectKeyRef = useRef<string | null | undefined>(traceSubjectKey)
+  traceSubjectKeyRef.current = traceSubjectKey
   // Lives across re-renders so plugin-contributed extensions can be
   // reconfigured into a mounted EditorView without remounting. The
   // effect below dispatches `compartment.reconfigure(...)` whenever
@@ -632,7 +637,8 @@ export function Composer({
     // no pills is a no-op; otherwise we commit to serializing.
     const state = view.state
     const docText = state.doc.toString()
-    const hasPills = getPills(state).length > 0
+    const pillCount = getPills(state).length
+    const hasPills = pillCount > 0
     if (docText.trim().length === 0 && !hasPills) {
       return true
     }
@@ -647,7 +653,12 @@ export function Composer({
     // doc the user actually submitted, not the now-empty editor.
     void (async () => {
       try {
-        const payload = await serializeForSubmit(state)
+        const payload = await perfTrace.asyncSpanForSubject(
+          traceSubjectKeyRef.current,
+          "composer.serialize_for_submit",
+          () => serializeForSubmit(state),
+          { docLength: docText.length, pillCount },
+        )
         if (
           payload.text.trim().length === 0 &&
           payload.images.length === 0
@@ -712,6 +723,16 @@ export function Composer({
 
   useEffect(() => {
     if (!hostRef.current) return
+
+    const mountSpan = perfTrace.startSpanForSubject(
+      traceSubjectKeyRef.current,
+      "composer.codemirror.mount",
+      {
+        composerKey,
+        readOnly: readOnlyRef.current === true,
+        embedded: embeddedRef.current === true,
+      },
+    )
 
     const isReadOnly = readOnlyRef.current === true
     // Embedded composers borrow the readOnly bubble's tight padding +
@@ -865,12 +886,41 @@ export function Composer({
       }
     }
 
+    mountSpan?.end({
+      seedLength: seed.length,
+      extensionCount: extensions.length,
+      contributedExtensionCount: codeMirrorExtensionsRef.current.length,
+    })
+    perfTrace.markForSubject(
+      traceSubjectKeyRef.current,
+      "composer.codemirror.ready",
+      {
+        composerKey,
+        readOnly: isReadOnly,
+        seedLength: seed.length,
+      },
+    )
+    const readyFrame = window.requestAnimationFrame(() => {
+      perfTrace.markForSubject(
+        traceSubjectKeyRef.current,
+        "composer.codemirror.first_frame",
+        { composerKey, readOnly: isReadOnly },
+      )
+      if (!isReadOnly) {
+        perfTrace.endFlowForSubject(traceSubjectKeyRef.current, "chat.open", {
+          terminal: "composer-first-frame",
+          composerKey,
+        })
+      }
+    })
+
     const onWindowFocus = () => {
       if (!isReadOnly) view.focus()
     }
     if (!isReadOnly) window.addEventListener("focus", onWindowFocus)
 
     return () => {
+      window.cancelAnimationFrame(readyFrame)
       if (!isReadOnly) {
         window.removeEventListener("focus", onWindowFocus)
         rememberComposerDraft(composerKeyRef.current, view.state.doc.toString())

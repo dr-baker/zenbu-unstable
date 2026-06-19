@@ -47,6 +47,8 @@ type ToolStatus =
   | "failed"
   | "interrupted"
 
+type CompactionReason = "manual" | "threshold" | "overflow" | "unknown"
+
 /**
  * Walk the pi event log and produce the list of materialized messages
  * the chat surface renders.
@@ -184,6 +186,9 @@ export function materializeMessages(
   // get their final blocks from `message_end.payload.message`, so
   // we can skip the O(n²) partial-JSON reparse on their deltas.
   let inFlightMessageStartSeq: number | null = null
+  // Index of the most recent running compaction card. `compaction_end`
+  // promotes this slot to a terminal state instead of leaving a spinner.
+  let pendingCompactionIdx: number | null = null
   for (let i = 0; i < events.length; i++) {
     const ev = events[i]
     if (ev.kind === "message_start") inFlightMessageStartSeq = ev.seq
@@ -234,6 +239,67 @@ export function materializeMessages(
         turnFiles = []
         turnFileIdx = new Map()
         pendingEdits.clear()
+        break
+      }
+      case "compaction_start": {
+        const payload = event.payload as { reason?: string } | undefined
+        out.push({
+          role: "compaction",
+          status: "running",
+          reason: normalizeCompactionReason(payload?.reason),
+          timestamp: event.timestamp,
+          key: `compaction-${event.seq}`,
+        })
+        pendingCompactionIdx = out.length - 1
+        break
+      }
+      case "compaction_end": {
+        const terminal = compactionFromEndEvent({
+          payload: event.payload,
+          timestamp: event.timestamp,
+          seq: event.seq,
+        })
+        if (pendingCompactionIdx != null) {
+          const prev = out[pendingCompactionIdx]
+          if (prev?.role === "compaction") {
+            out[pendingCompactionIdx] = {
+              ...prev,
+              ...terminal,
+              key: prev.key ?? terminal.key,
+            }
+          } else {
+            out.push(terminal)
+          }
+          pendingCompactionIdx = null
+        } else {
+          out.push(terminal)
+        }
+        break
+      }
+      case "compaction_summary": {
+        const payload = event.payload as
+          | {
+              summary?: string
+              tokensBefore?: number
+              firstKeptEntryId?: string
+              readFiles?: string[]
+              modifiedFiles?: string[]
+            }
+          | undefined
+        out.push({
+          role: "compaction",
+          status: "completed",
+          reason: "unknown",
+          historical: true,
+          timestamp: event.timestamp,
+          summary: payload?.summary,
+          tokensBefore: payload?.tokensBefore,
+          firstKeptEntryId: payload?.firstKeptEntryId,
+          readFiles: payload?.readFiles,
+          modifiedFiles: payload?.modifiedFiles,
+          key: `compaction-summary-${event.seq}`,
+        })
+        pendingCompactionIdx = null
         break
       }
       case "message_start": {
@@ -646,6 +712,70 @@ export function materializeMessages(
   }
 
   return coalesceThinking(out)
+}
+
+function normalizeCompactionReason(reason: string | undefined): CompactionReason {
+  if (reason === "manual" || reason === "threshold" || reason === "overflow") {
+    return reason
+  }
+  return "unknown"
+}
+
+type CompactionEndPayload = {
+  reason?: string
+  result?: {
+    summary?: string
+    firstKeptEntryId?: string
+    tokensBefore?: number
+    details?: { readFiles?: string[]; modifiedFiles?: string[] }
+  }
+  aborted?: boolean
+  willRetry?: boolean
+  errorMessage?: string
+}
+
+function compactionFromEndEvent(args: {
+  payload: unknown
+  timestamp: number
+  seq: number
+}): Extract<MaterializedMessage, { role: "compaction" }> {
+  const raw = (args.payload ?? {}) as CompactionEndPayload
+  const reason = normalizeCompactionReason(raw.reason)
+  const result = raw.result
+  const base = {
+    role: "compaction" as const,
+    reason,
+    timestamp: args.timestamp,
+    key: `compaction-${args.seq}`,
+  }
+
+  if (raw.aborted) {
+    return { ...base, status: "aborted" }
+  }
+
+  if (!result?.summary) {
+    return {
+      ...base,
+      status: "failed",
+      errorMessage:
+        raw.errorMessage ??
+        (reason === "overflow"
+          ? "Context overflow recovery failed"
+          : "Compaction failed"),
+    }
+  }
+
+  const details = result.details
+  return {
+    ...base,
+    status: "completed",
+    summary: result.summary,
+    tokensBefore: result.tokensBefore,
+    firstKeptEntryId: result.firstKeptEntryId,
+    willRetry: raw.willRetry === true,
+    readFiles: details?.readFiles,
+    modifiedFiles: details?.modifiedFiles,
+  }
 }
 
 function applyAssistantMessageUpdate(args: {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDbClient, useRpc } from "@zenbujs/core/react"
 import { X } from "lucide-react"
 import { newChatInCurrentPaneInRoot } from "../../lib/window-state/panes/splits"
+import { requestFocusComposer } from "../../lib/focus-composer"
 import { useWindowId } from "../../lib/window-state/window-id"
 import { LiveWidgetAckContext } from "./ack-context"
 import {
@@ -273,23 +274,16 @@ function TutorialBody() {
           // Wrapped in an object so TS doesn't narrow the
           // closure-assigned value to `never` after the await.
           const out: {
-            value: { chatId: string; scopeId: string; paneId: string } | null
+            value: ReturnType<typeof newChatInCurrentPaneInRoot>
           } = { value: null }
           await dbClient.update(root => {
             out.value = newChatInCurrentPaneInRoot(
               root as Parameters<typeof newChatInCurrentPaneInRoot>[0],
               windowId,
-            ) as typeof out.value
+            )
           })
-          if (out.value) {
-            try {
-              await rpc.pi.sessions.createChatSession({
-                scopeId: out.value.scopeId,
-                chatId: out.value.chatId,
-              })
-            } catch (err) {
-              console.error("[tutorial] createChatSession failed:", err)
-            }
+          if (out.value?.kind === "empty-chat") {
+            requestFocusComposer(out.value.composerId)
           }
         })()
         return

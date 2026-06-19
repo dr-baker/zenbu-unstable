@@ -1,5 +1,5 @@
 import { useCallback } from "react"
-import { useDb, useDbClient, useRpc } from "@zenbujs/core/react"
+import { useDb, useDbClient } from "@zenbujs/core/react"
 import type { OpenMode, ScopePaneStateView } from "../types"
 import { useWindowId } from "../window-id"
 import {
@@ -17,6 +17,7 @@ import {
   selectTabInRoot,
 } from "../selection"
 import { openViewInRoot } from "./views"
+import { requestFocusComposer } from "@/lib/focus-composer"
 
 /** Subscribe to the active scope's pane layout. Returns null when
  * no scope is selected (e.g. onboarding or a freshly created
@@ -61,72 +62,54 @@ export function useSelectTab() {
 export function useAddTab() {
   const windowId = useWindowId()
   const client = useDbClient()
-  const rpc = useRpc()
   return useCallback(
     (scopeId: string, paneId: string) => {
-      let result: { tabId: string; chatId: string; scopeId: string } | null = null
+      let result: ReturnType<typeof addTabInRoot> = null
       void client
         .update(root => {
           result = addTabInRoot(root, windowId, scopeId, paneId)
         })
         .then(() => {
-          if (!result) return
-          void rpc.pi.sessions
-            .createChatSession({ scopeId: result.scopeId, chatId: result.chatId })
-            .catch(err =>
-              console.error("[panes] addTab createChatSession failed:", err),
-            )
+          if (result?.kind === "empty-chat") requestFocusComposer(result.composerId)
         })
     },
-    [client, rpc, windowId],
+    [client, windowId],
   )
 }
 
 export function useCloseTab() {
   const windowId = useWindowId()
   const client = useDbClient()
-  const rpc = useRpc()
   return useCallback(
     (scopeId: string, paneId: string, tabId: string) => {
-      let result: { chatId: string; scopeId: string } | null = null
+      let result: ReturnType<typeof closeTabInRoot> = null
       void client
         .update(root => {
           result = closeTabInRoot(root, windowId, scopeId, paneId, tabId)
         })
         .then(() => {
-          if (!result) return
-          void rpc.pi.sessions
-            .createChatSession({ scopeId: result.scopeId, chatId: result.chatId })
-            .catch(err =>
-              console.error("[panes] closeTab createChatSession failed:", err),
-            )
+          if (result?.kind === "empty-chat") requestFocusComposer(result.composerId)
         })
     },
-    [client, rpc, windowId],
+    [client, windowId],
   )
 }
 
 export function useAddPane() {
   const windowId = useWindowId()
   const client = useDbClient()
-  const rpc = useRpc()
   return useCallback(
     (scopeId: string, afterPaneId?: string) => {
-      let result: { paneId: string; chatId: string; scopeId: string } | null = null
+      let result: ReturnType<typeof addPaneInRoot> = null
       void client
         .update(root => {
           result = addPaneInRoot(root, windowId, scopeId, afterPaneId)
         })
         .then(() => {
-          if (!result) return
-          void rpc.pi.sessions
-            .createChatSession({ scopeId: result.scopeId, chatId: result.chatId })
-            .catch(err =>
-              console.error("[panes] addPane createChatSession failed:", err),
-            )
+          if (result?.kind === "empty-chat") requestFocusComposer(result.composerId)
         })
     },
-    [client, rpc, windowId],
+    [client, windowId],
   )
 }
 

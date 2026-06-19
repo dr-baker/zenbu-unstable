@@ -4,6 +4,7 @@ import type { SplitPaneResult } from "@/lib/window-state/types"
 import { useWindowId } from "@/lib/window-state/window-id"
 import { useActiveScopeId } from "@/lib/window-state/active-view"
 import { splitPaneSameSessionInRoot } from "@/lib/window-state/panes/splits"
+import { pendingChatComposerId } from "@/lib/window-state/panes/tabs"
 import { requestFocusComposer } from "@/lib/focus-composer"
 
 /** Cmd+1…Cmd+9 — focus pane N in the active scope. If pane N doesn't
@@ -60,11 +61,10 @@ export function useFocusPaneShortcut() {
           const activeTab = afterPane.tabs.find(
             t => t.id === afterPane.activeTabId,
           )
-          if (
-            activeTab?.content.kind === "chat" &&
-            activeTab.content.chatId
-          ) {
-            requestFocusComposer(activeTab.content.chatId)
+          if (activeTab?.content.kind === "chat") {
+            requestFocusComposer(
+              activeTab.content.chatId ?? pendingChatComposerId(activeTab.id),
+            )
           }
         }
         // TS CFA can't see the closure assignment inside

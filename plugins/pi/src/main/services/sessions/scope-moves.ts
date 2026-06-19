@@ -130,6 +130,7 @@ export async function moveToNewWorktree(args: {
         // tool output mid-stream and leave pi in a weird state.
         await live.pi.abort()
       }
+      await svc.ctx.piResourceRegistry.markRuntimeSnapshotInactive({ sessionId })
       live.dispose()
       svc.live.delete(sessionId)
     }
@@ -243,6 +244,7 @@ export async function moveChatToExistingScope(args: {
       if (live.pi.isStreaming) {
         await live.pi.abort()
       }
+      await svc.ctx.piResourceRegistry.markRuntimeSnapshotInactive({ sessionId })
       live.dispose()
       svc.live.delete(sessionId)
     }

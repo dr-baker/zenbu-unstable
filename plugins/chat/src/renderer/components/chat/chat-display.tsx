@@ -11,6 +11,7 @@ import {
   type ScrollMetrics,
 } from "./message-list"
 import type { MessageComponents } from "./message-components"
+import { perfTrace } from "@/lib/perf-trace"
 
 export type ChatDisplayProps = {
   messages: MaterializedMessage[]
@@ -19,6 +20,7 @@ export type ChatDisplayProps = {
    * Owned by chat-pane (it has the session + stats); chat-display
    * just forwards. */
   loadingStats: LoadingStats
+  traceSubjectKey?: string | null
   components?: Partial<MessageComponents>
   onPermissionSelect?: (requestId: string, optionId: string | "__cancel__") => void
   /** Fired when the user submits an in-place edit of a past user
@@ -60,6 +62,7 @@ export function ChatDisplay({
   messages: allMessages,
   streaming,
   loadingStats,
+  traceSubjectKey,
   components,
   onPermissionSelect,
   onEditSubmit,
@@ -89,6 +92,29 @@ export function ChatDisplay({
     initialWindow,
     batchSize,
   })
+
+  useEffect(() => {
+    if (!traceSubjectKey) return
+    perfTrace.markForSubject(traceSubjectKey, "chat.display.committed", {
+      totalMessages: allMessages.length,
+      visibleMessages: messages.length,
+      hasMoreBefore,
+      hasMoreAfter,
+    })
+    const frame = window.requestAnimationFrame(() => {
+      perfTrace.markForSubject(traceSubjectKey, "chat.display.first_frame", {
+        totalMessages: allMessages.length,
+        visibleMessages: messages.length,
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    traceSubjectKey,
+    allMessages.length,
+    messages.length,
+    hasMoreBefore,
+    hasMoreAfter,
+  ])
 
   const listRef = useRef<MessageListHandle>(null)
   const [scrollMetrics, setScrollMetrics] = useState<ScrollMetrics | null>(null)
@@ -166,6 +192,7 @@ export function ChatDisplay({
         messages={messages}
         loading={streaming}
         loadingStats={loadingStats}
+        traceSubjectKey={traceSubjectKey}
         components={mergedComponents}
         onScrollMetrics={setScrollMetrics}
         hasMoreAbove={hasMoreBefore}

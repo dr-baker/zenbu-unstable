@@ -9,6 +9,8 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import type { OAuthLoginCallbacks } from "@earendil-works/pi-ai"
 
+import { preloadPackageProviders } from "../lib/preload-package-providers"
+
 // ---------------------------------------------------------------------------
 // AuthService
 //
@@ -203,6 +205,15 @@ const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     envVar: "OPENCODE_API_KEY",
     tagline: "OpenCode Zen models.",
   },
+  {
+    id: "cursor",
+    kind: "apiKey",
+    displayName: "Cursor",
+    envVar: "CURSOR_API_KEY",
+    tagline:
+      "Cursor SDK API key, or sign in via Pi /login (Use an API key → Cursor).",
+    supportsApiKey: true,
+  },
 
   // Cloud — placeholder rows. v1 just points users at the docs.
   {
@@ -307,6 +318,8 @@ export class AuthService extends Service.create({
 
   /** In-flight flow, or null when idle. */
   private flow: FlowController | null = null
+  /** Package preload runs once; `registeredProviders` survive refresh. */
+  private packageProvidersPreloaded = false
 
   async evaluate() {
     // Surface any deferred errors pi's auth layer accumulated
@@ -316,7 +329,8 @@ export class AuthService extends Service.create({
     for (const err of this.storage.drainErrors()) {
       console.error("[auth] storage error:", err)
     }
-    await this.publishStatuses()
+    // Initial model/provider publish happens from SessionsService
+    // after shell env is loaded so package discovery sees env vars.
 
     this.setup("clear-flow-on-dispose", () => () => {
       if (this.flow) {
@@ -344,7 +358,22 @@ export class AuthService extends Service.create({
    * so the renderer's "is this provider connected?" UI stays in
    * lockstep with the model picker.
    */
+  /**
+   * Load Pi packages once so extension `registerProvider` calls land
+   * in the shared registry before we project `getAvailable()`.
+   */
+  private async ensurePackageProvidersLoaded(): Promise<void> {
+    if (this.packageProvidersPreloaded) return
+    await preloadPackageProviders({
+      authStorage: this.storage,
+      modelRegistry: this.registry,
+    })
+    this.packageProvidersPreloaded = true
+  }
+
   async publishStatuses(): Promise<void> {
+    await this.ensurePackageProvidersLoaded()
+
     // Refresh the registry so models.json changes (and any
     // models.json-backed API keys) take effect on next read.
     this.registry.refresh()
@@ -402,6 +431,9 @@ export class AuthService extends Service.create({
       ...PROVIDER_CATALOG.map(p => p.id),
       ...oauthIds,
     ])
+    for (const m of available) {
+      ids.add(m.provider)
+    }
     const next: Record<
       string,
       {
