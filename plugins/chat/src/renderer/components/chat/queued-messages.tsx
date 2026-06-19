@@ -138,7 +138,7 @@ function QueuedRow({
   onFlipKind: () => void
   onSendNow: () => void
 }) {
-  const files = useContext(FileIndexContext)
+  const fileProvider = useContext(FileIndexContext)
   // Focus boundary for the auto-cancel-on-blur effect below.
   const rowRef = useRef<HTMLDivElement>(null)
 
@@ -192,7 +192,7 @@ function QueuedRow({
             // instead of stamping its own bg-card rectangle on top.
             embedded
             initialText={row.text}
-            files={files}
+            fileProvider={fileProvider}
             placeholder="Edit and press Enter to save"
             onSubmit={onSave}
             // Highlight the existing text so the first keystroke

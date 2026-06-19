@@ -10,7 +10,13 @@ import type {
 // is the only other consumer; this import moves with it in Phase 3.
 import { SYSTEM_RELOAD_SENTINEL } from "../../../../../../pi/src/main/lib/agent-resume"
 
-type EventItem = { seq: number; kind: string; payload: unknown; timestamp: number }
+export type MaterializeEventItem = {
+  seq: number
+  kind: string
+  payload: unknown
+  timestamp: number
+}
+type EventItem = MaterializeEventItem
 
 type AssistantContent =
   | { type: "text"; text: string }
@@ -81,6 +87,10 @@ export function materializeMessages(
     extraDirectories?: readonly string[]
     workspaceId?: string | null
     scopeId?: string | null
+    /** Base 0-based user-message index for callers that materialize a
+     * suffix/turn segment instead of the whole log. Whole-log callers
+     * keep the default of 0. */
+    initialUserMessageIndex?: number
   } = {},
 ): MaterializedMessage[] {
   const directory = options.directory ?? null
@@ -92,7 +102,7 @@ export function materializeMessages(
   // each materialized user message so the renderer can look up the
   // matching pi entry id when forking-from-edit. Reset on each call
   // since we always re-materialize from the head of the event log.
-  let userIdx = 0
+  let userIdx = options.initialUserMessageIndex ?? 0
 
   // Per-turn file-edit aggregator for the post-turn summary card.
   // Reset on every `user_prompt` (so each turn gets its own card),
@@ -712,6 +722,19 @@ export function materializeMessages(
   }
 
   return coalesceThinking(out)
+}
+
+export function countMaterializedUserMessages(
+  events: readonly MaterializeEventItem[],
+): number {
+  let count = 0
+  for (const event of events) {
+    if (event.kind !== "user_prompt") continue
+    const payload = event.payload as { text?: string } | undefined
+    if ((payload?.text ?? "").trim() === SYSTEM_RELOAD_SENTINEL) continue
+    count++
+  }
+  return count
 }
 
 function normalizeCompactionReason(reason: string | undefined): CompactionReason {

@@ -36,11 +36,11 @@ export type ChatPaneContainerProps = {
   paneCount: number
 }
 
-/** One pane in the chats host. Owns its own tab strip and renders every
- * visited tab (chat or view) under an `<Activity>` so state stays warm
- * when the user flips between tabs. Tabs whose content is a registered
- * view are mounted via `<View />`; tabs whose content is a chat are
- * mounted via `<ChatPane />`. */
+/** One pane in the chats host. Owns its own tab strip. Registered view
+ * tabs stay mounted under an `<Activity>` because their iframe boot cost
+ * dominates; chat tabs now mount the full `<ChatPane />` only while
+ * visible so inactive chats keep data warmth through the renderer MRU
+ * cache without retaining hidden Composer/ChatDisplay/session work. */
 export function ChatPaneContainer({
   scopeId,
   pane,
@@ -541,22 +541,22 @@ function TabPanel({
     return () => window.cancelAnimationFrame(frame)
   }, [visible, traceSubjectKey, tab.content.kind, tabContentChatId, tab.id, tabChatId, scopeId, paneId])
 
-  return (
-    <Activity mode={visible ? "visible" : "hidden"}>
-      <div className="absolute inset-0">
-        {tab.content.kind === "view" ? (
-          // View tabs share the same border rules as chat tabs: only
-          // draw a side when nothing adjacent already owns the line.
-          // Critically that means `border-t` IS drawn when the tab
-          // strip is hidden (`topAdjacent === false`), so single-tab
-          // panes still get a seam against the title bar above. The
-          // iframe deliberately doesn't draw any borders of its own;
-          // chrome lives entirely on the host side.
-          //
-          // `leftAdjacent` is forced true here — mirrors ChatPane's
-          // implicit "never draw a left border" policy (the sidebar /
-          // outer shell owns that edge). If we ever expose a pane
-          // with nothing on its left, we'll thread it through.
+  if (tab.content.kind === "view") {
+    return (
+      <Activity mode={visible ? "visible" : "hidden"}>
+        <div className="absolute inset-0">
+          {/* View tabs share the same border rules as chat tabs: only
+           * draw a side when nothing adjacent already owns the line.
+           * Critically that means `border-t` IS drawn when the tab
+           * strip is hidden (`topAdjacent === false`), so single-tab
+           * panes still get a seam against the title bar above. The
+           * iframe deliberately doesn't draw any borders of its own;
+           * chrome lives entirely on the host side.
+           *
+           * `leftAdjacent` is forced true here — mirrors ChatPane's
+           * implicit "never draw a left border" policy (the sidebar /
+           * outer shell owns that edge). If we ever expose a pane
+           * with nothing on its left, we'll thread it through. */}
           <PaneFrame
             topAdjacent={topAdjacent}
             bottomAdjacent={bottomAdjacent}
@@ -574,20 +574,50 @@ function TabPanel({
               }
             />
           </PaneFrame>
-        ) : (
-          <ChatPaneSlot
-            chat={chat}
-            pendingChat={pendingChat}
-            createPendingChat={createPendingChat}
-            leftAdjacent={leftAdjacent}
-            bottomAdjacent={bottomAdjacent}
-            rightAdjacent={rightAdjacent}
-            topAdjacent={topAdjacent}
-            traceContext={traceContext}
-          />
-        )}
-      </div>
-    </Activity>
+        </div>
+      </Activity>
+    )
+  }
+
+  if (!visible) {
+    return <DormantChatPanel tabId={tab.id} chatId={tabChatId} />
+  }
+
+  return (
+    <div className="absolute inset-0">
+      <ChatPaneSlot
+        chat={chat}
+        pendingChat={pendingChat}
+        createPendingChat={createPendingChat}
+        leftAdjacent={leftAdjacent}
+        bottomAdjacent={bottomAdjacent}
+        rightAdjacent={rightAdjacent}
+        topAdjacent={topAdjacent}
+        traceContext={traceContext}
+      />
+    </div>
+  )
+}
+
+function DormantChatPanel({
+  tabId,
+  chatId,
+}: {
+  tabId: string
+  chatId: string | null
+}) {
+  // Inactive chat tabs intentionally do not mount ChatPane. That keeps
+  // useCollection(eventLog), ChatDisplay, Composer/CodeMirror, footer,
+  // and session subscribe effects out of hidden tabs; the last active
+  // materialized model remains available from the chat MRU data cache.
+  return (
+    <div
+      aria-hidden="true"
+      data-chat-tab-dormant="true"
+      data-tab-id={tabId}
+      data-chat-id={chatId ?? undefined}
+      className="hidden"
+    />
   )
 }
 

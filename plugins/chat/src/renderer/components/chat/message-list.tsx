@@ -44,6 +44,7 @@ export type MessageListProps = {
   traceSubjectKey?: string | null
   components: MessageComponents
   onScrollMetrics?: (metrics: ScrollMetrics) => void
+  initialScrollTop?: number | null
   hasMoreAbove?: boolean
   hasMoreBelow?: boolean
   onLoadOlder?: (captureSnapshot: () => ScrollSnapshot | null) => void
@@ -129,6 +130,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
       traceSubjectKey,
       components: C,
       onScrollMetrics,
+      initialScrollTop,
       hasMoreAbove,
       hasMoreBelow,
       onLoadOlder,
@@ -252,7 +254,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         traceSubjectKey,
         "chat.message_list.initial_scroll",
         () => {
-          el.scrollTop = el.scrollHeight
+          el.scrollTop = initialScrollTop ?? el.scrollHeight
         },
         {
           messageCount: messages.length,
@@ -266,7 +268,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
       })
-    }, [messages.length, autoScroll, traceSubjectKey])
+    }, [messages.length, autoScroll, traceSubjectKey, initialScrollTop])
 
     useLayoutEffect(() => {
       const snapshot = pendingSnapshotRef.current
