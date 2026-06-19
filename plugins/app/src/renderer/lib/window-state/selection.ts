@@ -1,6 +1,7 @@
 import type { Root, WindowState } from "./types"
 import { ensureWindowState } from "./ensure"
 import { activeWorkspaceIdOf, primaryScopeIdOf } from "./derived"
+import { isLiveScope, isSidebarVisibleChat } from "./visibility"
 import {
   chatIdOf,
   ensureScopePanes,
@@ -25,7 +26,7 @@ export function setActiveScope(
   scopeId: string,
 ): void {
   const scope = root.app.scopes[scopeId]
-  if (!scope) return
+  if (!scope || !isLiveScope(root, scopeId)) return
   const ws = ensureWindowState(root, windowId)
   setActiveWorkspace(ws, scope.workspaceId)
   ws.selectedScopeId = scopeId
@@ -44,7 +45,7 @@ export function selectWorkspaceInRoot(
   setActiveWorkspace(ws, workspaceId)
   const remembered = ws.workspaceActiveScope[workspaceId] ?? null
   const candidate =
-    (remembered && root.app.scopes[remembered])
+    remembered && isLiveScope(root, remembered)
       ? remembered
       : primaryScopeIdOf(root, workspaceId)
   if (candidate) {
@@ -74,7 +75,7 @@ export function selectChatInRoot(
   chatId: string,
 ): void {
   const chat = root.app.chats[chatId]
-  if (!chat) return
+  if (!chat || !isSidebarVisibleChat(root, chatId)) return
   const scope = root.app.scopes[chat.scopeId]
   if (!scope) return
   setActiveScope(root, windowId, chat.scopeId)
@@ -109,7 +110,7 @@ export function focusPaneShowingChatInRoot(
   chatId: string,
 ): boolean {
   const chat = root.app.chats[chatId]
-  if (!chat) return false
+  if (!chat || !isSidebarVisibleChat(root, chatId)) return false
   if (!root.app.scopes[chat.scopeId]) return false
   const ws = root.app.windowStates[windowId]
   const state = ws?.scopePanes?.[chat.scopeId]
@@ -131,6 +132,7 @@ export function selectPaneInRoot(
   scopeId: string,
   paneId: string,
 ): void {
+  if (!isLiveScope(root, scopeId)) return
   const state = ensureScopePanes(root, windowId, scopeId)
   if (!state.panes.some(p => p.id === paneId)) return
   state.activePaneId = paneId
@@ -144,6 +146,7 @@ export function selectTabInRoot(
   paneId: string,
   tabId: string,
 ): void {
+  if (!isLiveScope(root, scopeId)) return
   const state = ensureScopePanes(root, windowId, scopeId)
   const pane = state.panes.find(p => p.id === paneId)
   if (!pane) return

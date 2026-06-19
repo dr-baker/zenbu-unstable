@@ -2,6 +2,7 @@ import { nanoid } from "nanoid"
 import type { OpenMode, Root } from "../types"
 import { setActiveScope, setActiveWorkspace } from "../selection"
 import { ensureWindowState } from "../ensure"
+import { isLiveScope, primaryLiveScopeIdOf } from "../visibility"
 import {
   ensureScopePanes,
   makeTab,
@@ -73,7 +74,7 @@ export function openViewInRoot(
   const ws = root.app.windowStates[windowId]
   if (!ws) return false
   const scopeId = ws.selectedScopeId
-  if (!scopeId) return false
+  if (!scopeId || !isLiveScope(root, scopeId)) return false
   const state = ensureScopePanes(root, windowId, scopeId)
   const activePane =
     state.panes.find(p => p.id === state.activePaneId) ?? state.panes[0]
@@ -168,7 +169,7 @@ export function openViewBySourceInRoot(
   const ws = root.app.windowStates[windowId]
   if (!ws) return false
   const scopeId = ws.selectedScopeId
-  if (!scopeId) return false
+  if (!scopeId || !isLiveScope(root, scopeId)) return false
   const state = ensureScopePanes(root, windowId, scopeId)
 
   const taggedArgs = { ...args, [VIEW_SOURCE_KEY]: source }
@@ -259,16 +260,21 @@ export function openViewBySourceInWorkspaceInRoot(
   source: string,
   args: Record<string, unknown> = {},
 ): boolean {
-  if (!root.app.workspaces[workspaceId]) return false
+  const workspace = root.app.workspaces[workspaceId]
+  if (!workspace || workspace.archived) return false
   const ws = ensureWindowState(root, windowId)
   setActiveWorkspace(ws, workspaceId)
 
-  // Resolve the target scope: caller's choice if it exists, else
-  // the workspace's last-active scope, else give up.
+  // Resolve the target scope: caller's choice if it is live, else
+  // the workspace's last-active live scope, else the primary live
+  // scope. Archived worktrees are not valid tab targets.
+  const rememberedScopeId = ws.workspaceActiveScope[workspaceId] ?? null
   const targetScopeId =
-    scopeId && root.app.scopes[scopeId]
+    scopeId && isLiveScope(root, scopeId)
       ? scopeId
-      : ws.workspaceActiveScope[workspaceId] ?? null
+      : rememberedScopeId && isLiveScope(root, rememberedScopeId)
+        ? rememberedScopeId
+        : primaryLiveScopeIdOf(root, workspaceId)
   if (!targetScopeId) return false
   setActiveScope(root, windowId, targetScopeId)
   const state = ensureScopePanes(root, windowId, targetScopeId)

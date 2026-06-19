@@ -86,6 +86,22 @@ export type MaterializedMessage =
       responded?: boolean
     })
   | (WithKey & {
+      role: "compaction"
+      status: "running" | "completed" | "failed" | "aborted"
+      reason: "manual" | "threshold" | "overflow" | "unknown"
+      timestamp: number
+      /** True when synthesized from a rebuilt `compactionSummary`
+       * message rather than a live start/end event pair. */
+      historical?: boolean
+      tokensBefore?: number
+      willRetry?: boolean
+      errorMessage?: string
+      summary?: string
+      firstKeptEntryId?: string
+      readFiles?: string[]
+      modifiedFiles?: string[]
+    })
+  | (WithKey & {
       role: "turn_summary"
       /** Files modified during this turn (between the previous
        * `user_prompt` and the closing `agent_end`). Ordered by

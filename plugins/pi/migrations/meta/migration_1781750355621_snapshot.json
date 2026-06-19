@@ -1,0 +1,80 @@
+{
+  "id": "07cfa74c-4ed9-4def-a011-3311f1af6557",
+  "prevId": "f0e37920-a4b4-45ce-81f8-9c63589674e2",
+  "fields": {
+    "extensions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "cd6fcdb17433f9fc",
+      "default": {}
+    },
+    "runtimeCommands": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "223fb893d28e1c0e",
+      "default": {}
+    },
+    "piResourceDefinitions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "59ed03098a9c1fc1",
+      "default": {}
+    },
+    "piResourceStaticCatalogs": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "44e5bb91b0bdacd6",
+      "default": {}
+    },
+    "sessionRuntimeSnapshots": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "4b26e1d47e527c20",
+      "default": {}
+    },
+    "resourceRegistrySettings": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "f7f743c134b27fac",
+      "default": {
+        "maxPreloadedStaticCatalogScopes": 10
+      }
+    },
+    "sessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "98bc0df661838c39",
+      "default": {}
+    },
+    "killedSessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "66cebe4d7ce03cd7",
+      "default": {}
+    },
+    "pendingReloadToasts": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "8cd6790799910376",
+      "default": {}
+    },
+    "models": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "389f9537591154c4",
+      "default": {}
+    },
+    "providerStatuses": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "1bd52280e6584c5f",
+      "default": {}
+    },
+    "oauthFlow": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "b6c1ab19889b0d34",
+      "default": null
+    }
+  }
+}

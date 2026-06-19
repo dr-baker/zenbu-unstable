@@ -1,4 +1,5 @@
 import { useDbClient } from "@zenbujs/core/react"
+import { isSidebarVisibleChat } from "./window-state/visibility"
 
 /**
  * One authoritative resolver for "which chat does this window
@@ -23,9 +24,9 @@ import { useDbClient } from "@zenbujs/core/react"
  *      → right for any chat tab. Catches the case where every
  *      pane is showing a view but a chat tab is still open
  *      somewhere in the background.
- *   4. Newest chat in the workspace by `createdAt`. Last-ditch
- *      fallback for windows with no pane state yet, or whose pane
- *      state has zero chat tabs.
+ *   4. Newest sidebar-visible chat in the workspace by `createdAt`.
+ *      Last-ditch fallback for windows with no pane state yet, or
+ *      whose pane state has zero live chat tabs.
  */
 
 type DbClient = ReturnType<typeof useDbClient>
@@ -69,7 +70,9 @@ export function resolveActiveChatId(
       activePane?.tabs.find(t => t.id === activePane.activeTabId) ??
       activePane?.tabs[0]
     const activeChatId = chatIdOf(activeTab)
-    if (activeChatId) return activeChatId
+    if (activeChatId && isSidebarVisibleChat(root, activeChatId)) {
+      return activeChatId
+    }
 
     // Active tab isn't a chat. Prefer a chat focused in another
     // pane (visible to the user) over a chat sitting in a
@@ -78,12 +81,12 @@ export function resolveActiveChatId(
       const tab =
         pane.tabs.find(t => t.id === pane.activeTabId) ?? pane.tabs[0]
       const chatId = chatIdOf(tab)
-      if (chatId) return chatId
+      if (chatId && isSidebarVisibleChat(root, chatId)) return chatId
     }
     for (const pane of paneState.panes) {
       for (const tab of pane.tabs) {
         const chatId = chatIdOf(tab)
-        if (chatId) return chatId
+        if (chatId && isSidebarVisibleChat(root, chatId)) return chatId
       }
     }
   }
@@ -124,6 +127,7 @@ function latestChatIdInWorkspace(
   let latestAt = -Infinity
   for (const chat of Object.values(root.app.chats)) {
     if (!workspaceScopes.has(chat.scopeId)) continue
+    if (!isSidebarVisibleChat(root, chat.id)) continue
     if (chat.createdAt > latestAt) {
       latestAt = chat.createdAt
       latestId = chat.id

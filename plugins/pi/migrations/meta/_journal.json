@@ -12,6 +12,12 @@
       "tag": "migration",
       "when": 1781274650023,
       "file": "migration_1781274650023"
+    },
+    {
+      "idx": 2,
+      "tag": "migration",
+      "when": 1781750355621,
+      "file": "migration_1781750355621"
     }
   ]
 }

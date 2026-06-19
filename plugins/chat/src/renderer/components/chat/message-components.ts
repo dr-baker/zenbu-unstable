@@ -120,6 +120,20 @@ export type PermissionRequestProps = {
   onSelect: (optionId: string | "__cancel__") => void
 }
 
+export type CompactionCardProps = {
+  status: "running" | "completed" | "failed" | "aborted"
+  reason: "manual" | "threshold" | "overflow" | "unknown"
+  timestamp: number
+  historical?: boolean
+  tokensBefore?: number
+  willRetry?: boolean
+  errorMessage?: string
+  summary?: string
+  firstKeptEntryId?: string
+  readFiles?: string[]
+  modifiedFiles?: string[]
+}
+
 export type LoadingProps = {
   /** Wall-clock timestamp (ms) the user's prompt was sent. Powers the
    * live "Xs / Xm Ys" elapsed label. Null while we don't have a
@@ -214,6 +228,7 @@ export type MessageComponents = {
   ToolCall: ComponentType<ToolCallProps>
   Plan: ComponentType<PlanProps>
   PermissionRequest: ComponentType<PermissionRequestProps>
+  CompactionCard: ComponentType<CompactionCardProps>
   Loading: ComponentType<LoadingProps>
   Interrupted: ComponentType<InterruptedProps>
   AgentReloaded: ComponentType<AgentReloadedProps>

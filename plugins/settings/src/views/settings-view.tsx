@@ -4,6 +4,7 @@ import {
   useDbClient,
   type ViewComponentProps,
 } from "@zenbujs/core/react";
+import { Switch } from "@zenbu/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@zenbu/ui/tabs";
 import {
   ToggleGroup,
@@ -147,6 +148,7 @@ export default function SettingsView({
               <ThemeRow />
               <DefaultSendModeRow />
               <ChatBackgroundRow />
+              <PerfTraceRow />
             </div>
           </TabsContent>
           <TabsContent
@@ -178,6 +180,35 @@ export default function SettingsView({
  * `useThemeSync` (mounted at the root of the renderer) reacts to the
  * change and updates the `<html>` classes.
  */
+function PerfTraceRow() {
+  const dbClient = useDbClient();
+  const enabled = useDb(
+    (root) => (root.app.settings as { perfTrace?: boolean }).perfTrace ?? false,
+  );
+
+  return (
+    <div className="flex items-center justify-between gap-4 @max-[480px]:flex-wrap @max-[480px]:items-start">
+      <div className="space-y-1">
+        <div className="text-[12px] font-medium text-foreground">
+          Performance trace logging
+        </div>
+        <p className="max-w-lg text-[11px] leading-4 text-muted-foreground">
+          Enables in-memory renderer perf traces for agent diagnostics. Slow
+          flows and manual dumps write JSONL under ~/.zenbu/logs/perf-traces.
+        </p>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={(next) => {
+          void dbClient.update((root) => {
+            (root.app.settings as { perfTrace?: boolean }).perfTrace = next;
+          });
+        }}
+      />
+    </div>
+  );
+}
+
 function ThemeRow() {
   const dbClient = useDbClient();
   const preference = useDb((root) => root.app.settings.theme) as Theme;

@@ -54,6 +54,10 @@ export async function activate(args: {
   }
   const sm = SessionManager.open(record.sessionFile, PI_SESSION_DIR)
   const scopeId = record.scopeId
+  await svc.ctx.piResourceRegistry.refreshStaticCatalog({
+    scopeId,
+    reason: "session-activate",
+  })
   const piConfig = await svc.ctx.piRuntime.getSessionConfig({
     sessionId,
     scopeId,
@@ -118,6 +122,7 @@ export async function activate(args: {
   }
 
   const { session } = await createAgentSession(options)
+  await svc.refreshAvailableModels()
   const existingTitle = record.title?.trim()
   if (!session.sessionName && existingTitle && existingTitle !== "Untitled") {
     session.setSessionName(existingTitle)
@@ -158,6 +163,7 @@ export async function activate(args: {
   live.addDisposer(unsubscribeScopes)
 
   await svc.syncPiRuntimeCommands(live)
+  await svc.syncRuntimeSnapshot(live)
   await syncRuntime({ svc, live })
   return live
 }
@@ -187,7 +193,12 @@ async function onScopesChanged(args: {
   if (added.length === 0 && removed.length === 0) return
   live.extraDirsSnapshot = [...after]
   try {
+    await svc.ctx.piResourceRegistry.markStaticCatalogDirty({
+      scopeId,
+      reason: "extra-directories-change",
+    })
     await live.pi.resourceLoader.reload()
+    await svc.syncRuntimeSnapshot(live)
   } catch (err) {
     console.warn(
       "[sessions] resourceLoader.reload() after extra-dirs change failed:",
@@ -434,9 +445,11 @@ export async function onPiEvent(args: {
     event.type === "agent_end" ||
     event.type === "turn_end" ||
     event.type === "queue_update" ||
+    event.type === "compaction_end" ||
     event.type === "thinking_level_changed" ||
     event.type === "session_info_changed"
   ) {
+    await svc.syncRuntimeSnapshot(live)
     await syncRuntime({ svc, live })
   }
 

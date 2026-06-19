@@ -1,9 +1,11 @@
-import { nanoid } from "nanoid"
-import { useDbClient, useRpc } from "@zenbujs/core/react"
+import { useDbClient } from "@zenbujs/core/react"
 import { useWindowId } from "@/lib/window-state/window-id"
 import { activeChatIdOf, activeWorkspaceIdOf } from "@/lib/window-state/derived"
+import { reconcileHiddenChatTabsInRoot } from "@/lib/window-state/sidebar-tab-sync"
 import { useSelectWorkspace, useShowOnboardingView } from "@/lib/window-state/active-view"
 import { focusPaneShowingChatInRoot, selectChatInRoot } from "@/lib/window-state/selection"
+import { ensureScopePanes } from "@/lib/window-state/panes/internal"
+import { addTabInRoot } from "@/lib/window-state/panes/tabs"
 import { useImportWorktrees } from "./use-import-worktrees"
 import { requestFocusComposer } from "@/lib/focus-composer"
 import { isChatActiveForSession } from "@/lib/sidebar-helpers"
@@ -20,7 +22,6 @@ export type SidebarActions = ReturnType<typeof useSidebarActions>
  * the moment of invocation, so the hook can be called from any
  * component without coupling that component to derived state. */
 export function useSidebarActions() {
-  const rpc = useRpc()
   const dbClient = useDbClient()
   const windowId = useWindowId()
   const selectWorkspace = useSelectWorkspace()
@@ -51,46 +52,24 @@ export function useSidebarActions() {
   }
 
   const createChatInScope = useStableCallback((scopeId: string) => {
-    const root = dbClient.readRoot()
-    const latest = Object.values(root.app.chats)
-      .filter(c => c.scopeId === scopeId)
-      .sort((a, b) => b.createdAt - a.createdAt)[0]
-    const latestSession =
-      latest?.session.kind === "ready"
-        ? root.pi.sessions[latest.session.sessionId]
-        : undefined
-    const latestHasMessage = latestSession?.lastMessageSentTime != null
-    if (latest && !latestHasMessage) {
-      void dbClient.update(r => selectChatInRoot(r, windowId, latest.id)).then(() => requestFocusComposer(latest.id))
-      return
-    }
-
-    const chatId = nanoid()
-    const now = Date.now()
+    let targetComposerId: string | null = null
     void dbClient
       .update(root => {
-        root.app.chats[chatId] = {
-          id: chatId,
-          scopeId,
-          session: { kind: "pending" },
-          createdAt: now,
-        }
-        selectChatInRoot(root, windowId, chatId)
+        const state = ensureScopePanes(root, windowId, scopeId)
+        const pane =
+          state.panes.find(p => p.id === state.activePaneId) ?? state.panes[0]
+        if (!pane) return
+        const result = addTabInRoot(root, windowId, scopeId, pane.id)
+        targetComposerId = result?.composerId ?? null
       })
       .then(() => {
-        void rpc.pi.sessions
-          .createChatSession({ scopeId, chatId })
-          .catch(err =>
-            console.error("[sidebar] createChatSession failed:", err),
-          )
-        requestFocusComposer(chatId)
+        if (targetComposerId) requestFocusComposer(targetComposerId)
       })
   })
 
-  // Sidebar "New Chat" (and ⌘N): create a fresh chat in the active
-  // worktree and replace the active tab's chat with it. The
-  // EditorView is reused across chat switches and only auto-focuses
-  // on mount, so we nudge focus afterwards.
+  // Sidebar "New Chat" (and ⌘N): append an unmaterialized chat draft
+  // tab. The real chat row + pi session are created only when the
+  // user sends.
   const handleNewChat = useStableCallback(() => {
     const scopeId = resolveNewChatScopeId()
     if (!scopeId) return
@@ -150,6 +129,7 @@ export function useSidebarActions() {
         if (nextChatId) {
           selectChatInRoot(r, windowId, nextChatId)
         }
+        reconcileHiddenChatTabsInRoot(r)
       })
       .then(() => {
         if (nextChatId) requestFocusComposer(nextChatId)
@@ -162,6 +142,7 @@ export function useSidebarActions() {
       if (!scope) return
       scope.archived = true
       scope.archivedAt = Date.now()
+      reconcileHiddenChatTabsInRoot(root)
     })
   })
 

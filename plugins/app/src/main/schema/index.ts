@@ -69,6 +69,7 @@ const schema = createSchema({
     vimMode: true,
     defaultSendMode: "followUp",
     chatDevtools: false,
+    perfTrace: false,
     disableTelemetry: false,
   }),
 });

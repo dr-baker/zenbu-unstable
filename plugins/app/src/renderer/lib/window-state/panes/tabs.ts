@@ -1,35 +1,29 @@
 import { nanoid } from "nanoid"
-import type { Root } from "../types"
+import type { EmptyChatTabResult, Root } from "../types"
 import { setActiveScope } from "../selection"
+import { isLiveScope, isSidebarVisibleChat } from "../visibility"
 import {
   chatIdOf,
   ensureScopePanes,
   makeTab,
+  pendingChatComposerId,
   setTabContent,
 } from "./internal"
 
-/** Append a tab to a pane, bound to a brand-new pending chat in the
- * scope. Callers must follow up with `sessions.createChatSession` —
- * the `useAddTab` hook does this automatically. */
+/** Append an unmaterialized chat tab to a pane. The tab carries
+ * `chatId=null` until its first submit; the chat row + pi session
+ * are created by the chat surface at send time. */
 export function addTabInRoot(
   root: Root,
   windowId: string,
   scopeId: string,
   paneId: string,
-): { tabId: string; chatId: string; scopeId: string } | null {
-  if (!root.app.scopes[scopeId]) return null
+): EmptyChatTabResult | null {
+  if (!isLiveScope(root, scopeId)) return null
   const state = ensureScopePanes(root, windowId, scopeId)
   const paneIdx = state.panes.findIndex(p => p.id === paneId)
   if (paneIdx < 0) return null
   const tabId = nanoid()
-  const chatId = nanoid()
-  const now = Date.now()
-  root.app.chats[chatId] = {
-    id: chatId,
-    scopeId,
-    session: { kind: "pending" },
-    createdAt: now,
-  }
   const pane = state.panes[paneIdx]!
   const activeIdx = pane.tabs.findIndex(t => t.id === pane.activeTabId)
   const insertAt = activeIdx < 0 ? pane.tabs.length : activeIdx + 1
@@ -37,26 +31,34 @@ export function addTabInRoot(
     ...pane,
     tabs: [
       ...pane.tabs.slice(0, insertAt),
-      makeTab(tabId, { kind: "chat", chatId }),
+      makeTab(tabId, { kind: "chat", chatId: null }),
       ...pane.tabs.slice(insertAt),
     ],
     activeTabId: tabId,
   }
   state.activePaneId = paneId
   setActiveScope(root, windowId, scopeId)
-  return { tabId, chatId, scopeId }
+  return {
+    kind: "empty-chat",
+    scopeId,
+    paneId,
+    tabId,
+    composerId: pendingChatComposerId(tabId),
+  }
 }
 
 /** Close a tab, cascading to closing its pane when it's the last
  * tab there. If it's the only tab of the only pane, replaces the
- * tab's content with a fresh chat so the layout never goes empty. */
+ * tab's content with an unmaterialized chat so the layout never goes
+ * empty and no abandoned session is created. */
 export function closeTabInRoot(
   root: Root,
   windowId: string,
   scopeId: string,
   paneId: string,
   tabId: string,
-): { chatId: string; scopeId: string } | null {
+): EmptyChatTabResult | null {
+  if (!isLiveScope(root, scopeId)) return null
   const state = ensureScopePanes(root, windowId, scopeId)
   const paneIdx = state.panes.findIndex(p => p.id === paneId)
   if (paneIdx < 0) return null
@@ -84,23 +86,22 @@ export function closeTabInRoot(
     setActiveScope(root, windowId, scopeId)
     return null
   }
-  // last tab of last pane → seed a fresh chat in this scope.
+  // last tab of last pane → keep the layout invariant with a blank
+  // unmaterialized chat tab instead of creating a throwaway session.
   const newTabId = nanoid()
-  const newChatId = nanoid()
-  const now = Date.now()
-  root.app.chats[newChatId] = {
-    id: newChatId,
-    scopeId,
-    session: { kind: "pending" },
-    createdAt: now,
-  }
   state.panes[paneIdx] = {
     ...pane,
-    tabs: [makeTab(newTabId, { kind: "chat", chatId: newChatId })],
+    tabs: [makeTab(newTabId, { kind: "chat", chatId: null })],
     activeTabId: newTabId,
   }
   setActiveScope(root, windowId, scopeId)
-  return { chatId: newChatId, scopeId }
+  return {
+    kind: "empty-chat",
+    scopeId,
+    paneId,
+    tabId: newTabId,
+    composerId: pendingChatComposerId(newTabId),
+  }
 }
 
 /** Bind a chat to a specific tab and focus it. */
@@ -112,6 +113,7 @@ export function assignChatToTabInRoot(
   tabId: string,
   chatId: string,
 ): void {
+  if (!isLiveScope(root, scopeId)) return
   const state = ensureScopePanes(root, windowId, scopeId)
   const pane = state.panes.find(p => p.id === paneId)
   if (!pane) return
@@ -136,7 +138,7 @@ export function openChatInNewTabInRoot(
   chatId: string,
 ): void {
   const chat = root.app.chats[chatId]
-  if (!chat) return
+  if (!chat || !isSidebarVisibleChat(root, chatId)) return
   if (!root.app.scopes[chat.scopeId]) return
   setActiveScope(root, windowId, chat.scopeId)
   const state = ensureScopePanes(root, windowId, chat.scopeId)
@@ -158,7 +160,7 @@ export function openChatInNewPaneInRoot(
   chatId: string,
 ): void {
   const chat = root.app.chats[chatId]
-  if (!chat) return
+  if (!chat || !isSidebarVisibleChat(root, chatId)) return
   if (!root.app.scopes[chat.scopeId]) return
   setActiveScope(root, windowId, chat.scopeId)
   const state = ensureScopePanes(root, windowId, chat.scopeId)
@@ -177,4 +179,4 @@ export function openChatInNewPaneInRoot(
   state.activePaneId = paneId
 }
 
-export { chatIdOf as paneTabChatId } from "./internal"
+export { chatIdOf as paneTabChatId, pendingChatComposerId } from "./internal"

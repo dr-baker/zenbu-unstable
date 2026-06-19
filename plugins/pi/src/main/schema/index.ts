@@ -3,6 +3,12 @@ import type { InferSchemaRoot } from "@zenbujs/core/db"
 
 import { session, killedSession, reloadToast, modelInfo } from "./session"
 import { providerStatus, oauthFlow } from "./auth"
+import {
+  piResourceDefinition,
+  piResourceRegistrySettings,
+  piResourceStaticCatalog,
+  piSessionRuntimeSnapshot,
+} from "./resource-state"
 
 const piExtensionSource = z.enum(["plugin", "built-in", "user", "project"])
 
@@ -29,8 +35,18 @@ const runtimeCommand = z.object({
 const schema = createSchema({
   extensions: z.record(z.string(), extension).default({}),
   runtimeCommands: z.record(z.string(), runtimeCommand).default({}),
+  piResourceDefinitions: z.record(z.string(), piResourceDefinition).default({}),
+  piResourceStaticCatalogs: z
+    .record(z.string(), piResourceStaticCatalog)
+    .default({}),
+  sessionRuntimeSnapshots: z
+    .record(z.string(), piSessionRuntimeSnapshot)
+    .default({}),
+  resourceRegistrySettings: piResourceRegistrySettings.default({
+    maxPreloadedStaticCatalogScopes: 10,
+  }),
 
-  /** One agent conversation backed by a pi session file. Owned by
+  /** One agent conversation backed by
    * `SessionsService`; the chat surface holds only a sessionId ref. */
   sessions: z.record(z.string(), session).default({}),
   /** Sessions whose in-flight agent run was killed by a hot reload

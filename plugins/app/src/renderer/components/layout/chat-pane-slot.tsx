@@ -1,6 +1,7 @@
 import type { ComponentType } from "react"
 import * as coreReact from "@zenbujs/core/react"
 import type { Schema } from "../../../main/schema"
+import type { PerfTraceContext } from "@/lib/perf-trace"
 
 const { useInjection } = coreReact
 
@@ -31,6 +32,10 @@ const useInjectionFailure: (name: string) => InjectionLoadFailure | undefined =
     | undefined) ?? (() => undefined)
 
 type Chat = Schema["chats"][string]
+type PendingChatPane = {
+  scopeId: string
+  composerId: string
+}
 
 /**
  * Structural mirror of the chat plugin's `ChatPaneProps`. The shell
@@ -41,10 +46,15 @@ type Chat = Schema["chats"][string]
  */
 export type ChatPaneSlotProps = {
   chat: Chat | null
+  /** Unmaterialized chat tab. The shell creates no chat/session row
+   * until the chat pane calls `createPendingChat` on first submit. */
+  pendingChat?: PendingChatPane
+  createPendingChat?: () => Promise<{ chatId: string; sessionId: string }>
   leftAdjacent?: boolean
   bottomAdjacent?: boolean
   rightAdjacent?: boolean
   topAdjacent?: boolean
+  traceContext?: PerfTraceContext
 }
 
 /**

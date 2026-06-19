@@ -1,4 +1,4 @@
-import { Activity, useCallback, useEffect, useMemo, useRef } from "react"
+import { Activity, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { nanoid } from "nanoid"
 import {
   View,
@@ -15,8 +15,10 @@ import { chatLabel } from "@/lib/chat-label"
 import { useVisited } from "@/lib/hooks/use-visited"
 import type { PaneTabView, PaneView } from "@/lib/window-state/types"
 import { useWindowId } from "@/lib/window-state/window-id"
-import { assignChatToTabInRoot, openChatInNewTabInRoot, paneTabChatId } from "@/lib/window-state/panes/tabs"
+import { assignChatToTabInRoot, openChatInNewTabInRoot, paneTabChatId, pendingChatComposerId } from "@/lib/window-state/panes/tabs"
+import { ensureScopePanes } from "@/lib/window-state/panes/internal"
 import { useAddPane, useAddTab, useClosePane, useCloseTab, useSelectPane, useSelectTab } from "@/lib/window-state/panes/hooks"
+import { perfTrace } from "@/lib/perf-trace"
 export type ChatPaneContainerProps = {
   scopeId: string
   pane: PaneView
@@ -53,10 +55,36 @@ export function ChatPaneContainer({
   const sessionsById = useDb(root => root.pi.sessions)
   const injections = useInjections()
 
+  const [optimisticActiveTabId, setOptimisticActiveTabId] = useState<string | null>(null)
+  const activeTabId = useMemo(() => {
+    if (
+      optimisticActiveTabId &&
+      pane.tabs.some(t => t.id === optimisticActiveTabId)
+    ) {
+      return optimisticActiveTabId
+    }
+    return pane.activeTabId
+  }, [optimisticActiveTabId, pane.tabs, pane.activeTabId])
+
+  useEffect(() => {
+    if (!optimisticActiveTabId) return
+    if (pane.activeTabId === optimisticActiveTabId) {
+      setOptimisticActiveTabId(null)
+      return
+    }
+    if (!pane.tabs.some(t => t.id === optimisticActiveTabId)) {
+      setOptimisticActiveTabId(null)
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      setOptimisticActiveTabId(null)
+    }, 2_000)
+    return () => window.clearTimeout(timeout)
+  }, [optimisticActiveTabId, pane.activeTabId, pane.tabs])
+
   const activeTab = useMemo<PaneTabView | null>(
-    () =>
-      pane.tabs.find(t => t.id === pane.activeTabId) ?? pane.tabs[0] ?? null,
-    [pane.tabs, pane.activeTabId],
+    () => pane.tabs.find(t => t.id === activeTabId) ?? pane.tabs[0] ?? null,
+    [pane.tabs, activeTabId],
   )
 
   // Track ids we've ever shown so React keeps DOM mounted. We key by
@@ -102,7 +130,7 @@ export function ChatPaneContainer({
           }
         }
         const chat = t.content.chatId ? chatsById[t.content.chatId] : null
-        const title = chat ? chatLabel(chat, sessionsById) : "New tab"
+        const title = chat ? chatLabel(chat, sessionsById) : "New chat"
         const sessionId =
           chat && chat.session.kind === "ready"
             ? chat.session.sessionId
@@ -112,11 +140,10 @@ export function ChatPaneContainer({
         // Only show unread on tabs that aren't the active tab of
         // a focused pane. `SessionActivityService` stamps
         // `lastOpenedAt` for active tabs, but it only fires AFTER
-        // a db update lands — the local `t.id !== pane.activeTabId
-        // || !isActivePane` guard avoids a 1-frame flash where the
-        // dot would otherwise be visible on the tab the user just
-        // clicked into.
-        const isFocusedHere = isActivePane && t.id === pane.activeTabId
+        // a db update lands — the local active-tab guard avoids a
+        // 1-frame flash where the dot would otherwise be visible on
+        // the tab the user just clicked into.
+        const isFocusedHere = isActivePane && t.id === activeTabId
         const hasUnread =
           !isFocusedHere &&
           sessionRecord != null &&
@@ -133,7 +160,7 @@ export function ChatPaneContainer({
           isView: false,
         }
       }),
-    [pane.tabs, pane.activeTabId, isActivePane, chatsById, sessionsById, viewLabelFor],
+    [pane.tabs, activeTabId, isActivePane, chatsById, sessionsById, viewLabelFor],
   )
 
   const selectPane = useSelectPane()
@@ -147,9 +174,26 @@ export function ChatPaneContainer({
 
   const handleSelectTab = useCallback(
     (tabId: string) => {
+      const tab = pane.tabs.find(t => t.id === tabId)
+      const subjectKey = traceSubjectForTab(tab)
+      if (subjectKey && tabId !== activeTabId) {
+        perfTrace.startFlow(
+          "chat.open",
+          {
+            source: "tab-select",
+            scopeId,
+            paneId: pane.id,
+            tabId,
+            chatId: paneTabChatId(tab),
+            previousTabId: activeTabId,
+          },
+          { subjectKey },
+        )
+      }
+      setOptimisticActiveTabId(tabId)
       selectTab(scopeId, pane.id, tabId)
     },
-    [selectTab, scopeId, pane.id],
+    [selectTab, scopeId, pane.id, pane.tabs, activeTabId],
   )
 
   const handleCloseTab = useCallback(
@@ -195,23 +239,20 @@ export function ChatPaneContainer({
   const activeChat = activeChatId ? chatsById[activeChatId] : null
   const activeIsView = activeTab?.content.kind === "view"
 
-  // Safety net for two adjacent failure modes that both manifest as
-  // "the chat surface looks alive but Enter does nothing":
+  // Safety net for two failure modes that manifest as "the chat
+  // surface looks alive but Enter does nothing":
   //
-  //   1. Legacy / edge-case data: a chat tab points at `chatId=null`
-  //      (or a chatId that no longer resolves). We fabricate a fresh
+  //   1. Pending session: the chat exists but its `session` is still
+  //      `{ kind: "pending" }` because whoever created it didn't (or
+  //      couldn't) follow up with `createChatSession`.
+  //   2. Legacy / edge-case data: a chat tab points at a non-null
+  //      chatId that no longer resolves. We fabricate a replacement
   //      chat in the pane's scope and assign it to the tab, then
   //      materialize its session.
-  //   2. Pending session: the chat exists but its `session` is still
-  //      `{ kind: "pending" }` because whoever created it didn't (or
-  //      couldn't) follow up with `createChatSession`. The most
-  //      visible offender historically was the auto-created
-  //      self-edit workspace (long since removed), but anything
-  //      that creates a pending chat and forgets the RPC ends up
-  //      here too. We just
-  //      fire `createChatSession`; it's idempotent (returns the
-  //      existing sessionId if the chat is already ready), so a
-  //      duplicate against a race winner is harmless.
+  //
+  // A `chatId=null` tab is no longer an error: it is the intentional
+  // "new chat draft" state. Those tabs stay unmaterialized until the
+  // user submits the first message.
   //
   // We key the re-entrancy guard by `tab.id + chatId` so flipping
   // chats in the same tab doesn't lock the second one out, and
@@ -222,8 +263,9 @@ export function ChatPaneContainer({
     if (activeIsView) return
     if (!activeTab) return
     if (activeTab.content.kind !== "chat") return
+    if (activeTab.content.chatId == null) return
 
-    // Case 2: the chat exists but its session is still pending.
+    // Case 1: the chat exists but its session is still pending.
     // Fire-and-forget the materialize RPC; the chat record flips to
     // `ready` on the next replica tick and the surface comes alive
     // without remounting.
@@ -245,10 +287,11 @@ export function ChatPaneContainer({
       return
     }
 
-    // Case 1: no chat record under this tab — fabricate one.
+    // Case 2: no chat record under this non-null chatId — fabricate one.
     if (activeChat) return
-    if (filledTabRef.current === activeTab.id) return
-    filledTabRef.current = activeTab.id
+    const missingGuardKey = `${activeTab.id}:${activeTab.content.chatId}`
+    if (filledTabRef.current === missingGuardKey) return
+    filledTabRef.current = missingGuardKey
     const chatId = nanoid()
     const now = Date.now()
     void dbClient
@@ -286,6 +329,63 @@ export function ChatPaneContainer({
     windowId,
   ])
 
+  const createPendingChat = useCallback(
+    async (tabId: string): Promise<{ chatId: string; sessionId: string }> => {
+      let chatId: string | null = null
+      const draftId = pendingChatComposerId(tabId)
+      await dbClient.update(root => {
+        let state = root.app.windowStates[windowId]?.scopePanes?.[scopeId]
+        let targetPane = state?.panes.find(p => p.id === pane.id)
+        let tab = targetPane?.tabs.find(t => t.id === tabId)
+
+        if (!tab && !state) {
+          state = ensureScopePanes(root, windowId, scopeId)
+          const fallbackPane =
+            state.panes.find(p => p.id === state.activePaneId) ?? state.panes[0]
+          targetPane = fallbackPane
+          tab = fallbackPane
+            ? fallbackPane.tabs.find(t => t.id === fallbackPane.activeTabId) ??
+              fallbackPane.tabs[0]
+            : undefined
+        }
+
+        if (!targetPane || !tab || tab.content.kind !== "chat") return
+
+        if (tab.content.chatId && root.app.chats[tab.content.chatId]) {
+          chatId = tab.content.chatId
+        } else {
+          chatId = nanoid()
+          root.app.chats[chatId] = {
+            id: chatId,
+            scopeId,
+            session: { kind: "pending" },
+            createdAt: Date.now(),
+          }
+          assignChatToTabInRoot(
+            root,
+            windowId,
+            scopeId,
+            targetPane.id,
+            tab.id,
+            chatId,
+          )
+        }
+      })
+      if (!chatId) {
+        throw new Error("Pending chat tab disappeared before submit")
+      }
+      const created = await rpc.pi.sessions.createChatSession({
+        scopeId,
+        chatId,
+      })
+      await dbClient.update(root => {
+        delete root.app.chatStates[draftId]
+      })
+      return { chatId, sessionId: created.sessionId }
+    },
+    [dbClient, rpc, scopeId, pane.id, windowId],
+  )
+
   const childTopAdjacent = !hideTabBar
 
   return (
@@ -321,10 +421,22 @@ export function ChatPaneContainer({
                 ? chatsById[tab.content.chatId] ?? null
                 : null
             }
+            pendingChat={
+              tab.content.kind === "chat" && tab.content.chatId == null
+                ? { scopeId, composerId: pendingChatComposerId(tab.id) }
+                : undefined
+            }
+            createPendingChat={
+              tab.content.kind === "chat" && tab.content.chatId == null
+                ? () => createPendingChat(tab.id)
+                : undefined
+            }
             leftAdjacent={leftAdjacent}
             rightAdjacent={rightAdjacent}
             bottomAdjacent={bottomAdjacent}
             topAdjacent={childTopAdjacent}
+            scopeId={scopeId}
+            paneId={pane.id}
           />
         ))}
       </div>
@@ -338,20 +450,28 @@ type TabPanelProps = {
   tab: PaneTabView
   visible: boolean
   chat: Chat | null
+  pendingChat?: { scopeId: string; composerId: string }
+  createPendingChat?: () => Promise<{ chatId: string; sessionId: string }>
   leftAdjacent: boolean
   rightAdjacent: boolean
   bottomAdjacent: boolean
   topAdjacent: boolean
+  scopeId: string
+  paneId: string
 }
 
 function TabPanel({
   tab,
   visible,
   chat,
+  pendingChat,
+  createPendingChat,
   leftAdjacent,
   rightAdjacent,
   bottomAdjacent,
   topAdjacent,
+  scopeId,
+  paneId,
 }: TabPanelProps) {
   // Pane chrome (including the top seam when the tab strip is
   // suppressed) is owned entirely by `PaneFrame` / `ChatPane` —
@@ -361,6 +481,55 @@ function TabPanel({
   // it stacked on top of `PaneFrame`'s own top border and showed
   // up as a 2px-thick seam against the title bar. The wrapper is
   // back to being a neutral positioning container.
+  const traceSubjectKey = traceSubjectForTab(tab)
+  const tabChatId = paneTabChatId(tab)
+  const tabContentChatId = tab.content.kind === "chat" ? tab.content.chatId : null
+  const traceContext = useMemo(
+    () =>
+      traceSubjectKey
+        ? {
+            subjectKey: traceSubjectKey,
+            source: "tab-panel",
+            visible,
+            args: {
+              scopeId,
+              paneId,
+              tabId: tab.id,
+              chatId: tabChatId,
+            },
+          }
+        : undefined,
+    [traceSubjectKey, visible, scopeId, paneId, tab.id, tabChatId],
+  )
+
+  useEffect(() => {
+    if (!visible || !traceSubjectKey || tab.content.kind !== "chat") return
+    perfTrace.ensureFlow(
+      "chat.open",
+      {
+        source: "tab-panel-visible",
+        scopeId,
+        paneId,
+        tabId: tab.id,
+        chatId: tabChatId,
+      },
+      { subjectKey: traceSubjectKey },
+    )
+    perfTrace.markForSubject(traceSubjectKey, "chat.tab_panel.visible", {
+      scopeId,
+      paneId,
+      tabId: tab.id,
+      chatId: tabChatId,
+      pending: tab.content.chatId == null,
+    })
+    const frame = window.requestAnimationFrame(() => {
+      perfTrace.markForSubject(traceSubjectKey, "chat.tab_panel.first_frame", {
+        tabId: tab.id,
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [visible, traceSubjectKey, tab.content.kind, tabContentChatId, tab.id, tabChatId, scopeId, paneId])
+
   return (
     <Activity mode={visible ? "visible" : "hidden"}>
       <div className="absolute inset-0">
@@ -397,15 +566,24 @@ function TabPanel({
         ) : (
           <ChatPaneSlot
             chat={chat}
+            pendingChat={pendingChat}
+            createPendingChat={createPendingChat}
             leftAdjacent={leftAdjacent}
             bottomAdjacent={bottomAdjacent}
             rightAdjacent={rightAdjacent}
             topAdjacent={topAdjacent}
+            traceContext={traceContext}
           />
         )}
       </div>
     </Activity>
   )
+}
+
+function traceSubjectForTab(tab: PaneTabView | null | undefined): string | null {
+  if (!tab || tab.content.kind !== "chat") return null
+  if (tab.content.chatId) return `chat:${tab.content.chatId}`
+  return `pending:${pendingChatComposerId(tab.id)}`
 }
 
 function formatLabel(type: string): string {

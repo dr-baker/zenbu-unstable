@@ -1,4 +1,9 @@
 import type { Root } from "./types"
+import {
+  isSidebarVisibleChat,
+  latestSidebarVisibleChatIdInScope,
+  primaryLiveScopeIdOf,
+} from "./visibility"
 
 /** Pull the active workspace id out of `activeView`. `null` when the
  * window isn't showing a workspace (e.g. onboarding). */
@@ -30,54 +35,53 @@ export function activeChatIdOf(
     paneState.panes[0]
   const tab =
     pane?.tabs.find(t => t.id === pane.activeTabId) ?? pane?.tabs[0]
-  if (tab?.content.kind === "chat" && tab.content.chatId) {
+  if (
+    tab?.content.kind === "chat" &&
+    tab.content.chatId &&
+    isSidebarVisibleChat(root, tab.content.chatId)
+  ) {
     return tab.content.chatId
   }
   for (const p of paneState.panes) {
     const active = p.tabs.find(t => t.id === p.activeTabId) ?? p.tabs[0]
-    if (active?.content.kind === "chat" && active.content.chatId) {
+    if (
+      active?.content.kind === "chat" &&
+      active.content.chatId &&
+      isSidebarVisibleChat(root, active.content.chatId)
+    ) {
       return active.content.chatId
     }
   }
   for (const p of paneState.panes) {
     for (const t of p.tabs) {
-      if (t.content.kind === "chat" && t.content.chatId) return t.content.chatId
+      if (
+        t.content.kind === "chat" &&
+        t.content.chatId &&
+        isSidebarVisibleChat(root, t.content.chatId)
+      ) {
+        return t.content.chatId
+      }
     }
   }
   return null
 }
 
-/** Earliest-created scope in a workspace. Fallback target when no
+/** Earliest-created live scope in a workspace. Fallback target when no
  * scope is otherwise selected. */
 export function primaryScopeIdOf(
   root: Root,
   workspaceId: string,
 ): string | null {
-  let earliest: { id: string; createdAt: number } | null = null
-  for (const scope of Object.values(root.app.scopes)) {
-    if (scope.workspaceId !== workspaceId) continue
-    if (!earliest || scope.createdAt < earliest.createdAt) {
-      earliest = { id: scope.id, createdAt: scope.createdAt }
-    }
-  }
-  return earliest?.id ?? null
+  return primaryLiveScopeIdOf(root, workspaceId)
 }
 
-/** Most recent chat in a scope (used to seed a fresh pane layout). */
+/** Most recent sidebar-visible chat in a live scope (used to seed a
+ * fresh pane layout). */
 export function latestChatIdInScope(
   root: Root,
   scopeId: string,
 ): string | null {
-  let latestId: string | null = null
-  let latestAt = -Infinity
-  for (const chat of Object.values(root.app.chats)) {
-    if (chat.scopeId !== scopeId) continue
-    if (chat.createdAt > latestAt) {
-      latestAt = chat.createdAt
-      latestId = chat.id
-    }
-  }
-  return latestId
+  return latestSidebarVisibleChatIdInScope(root, scopeId)
 }
 
 /** Most recent chat across every scope in a workspace. */
@@ -93,6 +97,7 @@ export function latestChatIdInWorkspace(
   let latestAt = -Infinity
   for (const chat of Object.values(root.app.chats)) {
     if (!workspaceScopes.has(chat.scopeId)) continue
+    if (!isSidebarVisibleChat(root, chat.id)) continue
     if (chat.createdAt > latestAt) {
       latestAt = chat.createdAt
       latestId = chat.id

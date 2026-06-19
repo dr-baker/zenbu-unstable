@@ -16,6 +16,7 @@ import {
   openViewBySourceInWorkspaceInRoot,
   openViewInRoot,
 } from "@/lib/window-state/panes/views";
+import { requestFocusComposer } from "@/lib/focus-composer";
 import { useSidebarActions } from "./use-sidebar-actions";
 
 export function useAgentSidebarEvents() {
@@ -128,6 +129,25 @@ export function useAgentSidebarEvents() {
   }, [events, dbClient, windowId]);
 
   useEffect(() => {
+    const handleSplitResult = (
+      result: SplitPaneResult | null,
+      label: string,
+    ) => {
+      if (result?.kind === "empty-chat") {
+        requestFocusComposer(result.composerId);
+        return;
+      }
+      if (result?.kind === "chat" && result.needsSession) {
+        void rpc.pi.sessions
+          .createChatSession({
+            scopeId: result.scopeId,
+            chatId: result.chatId,
+          })
+          .catch((err) =>
+            console.error(`[shortcuts] ${label} createChatSession failed:`, err),
+          );
+      }
+    };
     const offSidebar = events.app.toggleSidebar.subscribe(() => {
       setSidebarOpen((o) => !o);
     });
@@ -140,21 +160,7 @@ export function useAgentSidebarEvents() {
         .update((root) => {
           result = splitPaneSameSessionInRoot(root, windowId);
         })
-        .then(() => {
-          if (result?.kind === "chat" && result.needsSession) {
-            void rpc.pi.sessions
-              .createChatSession({
-                scopeId: result.scopeId,
-                chatId: result.chatId,
-              })
-              .catch((err) =>
-                console.error(
-                  "[shortcuts] split-same-session createChatSession failed:",
-                  err,
-                ),
-              );
-          }
-        });
+        .then(() => handleSplitResult(result, "split-same-session"));
     });
     const offNew = events.app.splitPaneNewChat.subscribe(() => {
       let result: SplitPaneResult | null = null;
@@ -162,20 +168,7 @@ export function useAgentSidebarEvents() {
         .update((root) => {
           result = splitPaneNewChatInRoot(root, windowId);
         })
-        .then(() => {
-          if (result?.kind !== "chat") return;
-          void rpc.pi.sessions
-            .createChatSession({
-              scopeId: result.scopeId,
-              chatId: result.chatId,
-            })
-            .catch((err) =>
-              console.error(
-                "[shortcuts] split-new-chat createChatSession failed:",
-                err,
-              ),
-            );
-        });
+        .then(() => handleSplitResult(result, "split-new-chat"));
     });
     const offClose = events.app.closeActivePane.subscribe(() => {
       void dbClient.update((root) => {
@@ -188,20 +181,7 @@ export function useAgentSidebarEvents() {
         .update((root) => {
           result = newChatInCurrentPaneInRoot(root, windowId);
         })
-        .then(() => {
-          if (result?.kind !== "chat") return;
-          void rpc.pi.sessions
-            .createChatSession({
-              scopeId: result.scopeId,
-              chatId: result.chatId,
-            })
-            .catch((err) =>
-              console.error(
-                "[shortcuts] new-chat-in-current-pane createChatSession failed:",
-                err,
-              ),
-            );
-        });
+        .then(() => handleSplitResult(result, "new-chat-in-current-pane"));
     });
     return () => {
       offSidebar();

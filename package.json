@@ -39,6 +39,9 @@
     "url": "git@github.com:zenbu-labs/zenbu-release.git"
   },
   "pnpm": {
+    "overrides": {
+      "@zenbujs/core": "link:../../../Developer/zenbu.js/packages/core"
+    },
     "onlyBuiltDependencies": [
       "@google/genai",
       "@parcel/watcher",

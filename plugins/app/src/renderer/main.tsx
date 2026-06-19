@@ -12,6 +12,9 @@ declare global {
 // installed by the iframe prelude that runs before this module evaluates.
 window.__zenbuBootTrace?.mark("main-tsx-eval");
 
+import { perfTrace } from "./lib/perf-trace";
+perfTrace.install();
+
 import { installDbReplicaTracer } from "./boot/db-replica-tracer";
 installDbReplicaTracer();
 

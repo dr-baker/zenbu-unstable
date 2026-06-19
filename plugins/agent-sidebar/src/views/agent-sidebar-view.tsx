@@ -6,6 +6,7 @@ import { useSetLeftSidebarOpen } from "@/lib/window-state/workspace-ui"
 import { NewChatSplitButton } from "./components/new-chat-split-button"
 import { AgentSidebarFooter } from "./components/agent-sidebar-footer"
 import { ChatSidebarItem } from "./components/chat-sidebar-item"
+import { ChatTreeRow } from "./components/chat-tree-row"
 import { WorktreeGroupRow } from "./components/worktree-group-row"
 import { WorktreeGroupPinButton } from "./components/worktree-group-pin-button"
 import { ChatRowActionButton } from "./components/chat-row-action-button"
@@ -25,6 +26,7 @@ import {
   useActiveChatId,
   useActiveWorkspaceId,
 } from "@/lib/window-state/active-view"
+import type { PendingSidebarChat } from "@/hooks/use-sidebar-selectors"
 import {
   useToggleWorktreeGroupCollapsed,
   useWorktreeGroupCollapsed,
@@ -111,6 +113,13 @@ export default function AgentSidebarView(_props: ViewComponentProps) {
   }, [events, windowId, actions])
 
   const multiGroupVisible = sidebarGroups.length > 1
+  const activePendingChat =
+    sidebarGroups.find(group => group.pendingChat)?.pendingChat ?? null
+  const activeRowId = activePendingChat
+    ? activePendingChat.id
+    : activeChatId
+      ? `chat:${activeChatId}`
+      : undefined
 
   const openCreateWorktreeFromSidebar = async () => {
     // No repo backing the workspace yet — transparently `git init`
@@ -184,31 +193,37 @@ export default function AgentSidebarView(_props: ViewComponentProps) {
         <ListNav
           id="agent-sidebar"
           label="Agent Sidebar"
-          activeRowId={activeChatId ? `chat:${activeChatId}` : undefined}
+          activeRowId={activeRowId}
           className="absolute inset-0 overflow-auto outline-none"
           style={{ paddingBottom: BODY_BOTTOM_PAD }}
         >
           <div className="px-1.5">
             {sidebarGroups.length === 0 ? null : sidebarGroups.length === 1 ? (
               // Single-worktree case: skip the group wrapper.
-              sidebarGroups[0]!.chats.map(chat => (
-                <ListNav.Leaf
-                  key={chat.id}
-                  id={`chat:${chat.id}`}
-                  kind="chat"
-                  onActivate={() => openChat(chat.id)}
-                >
-                  <ChatSidebarItem
-                    chat={chat}
-                    canArchive={sidebarGroups[0]!.chats.length > 1}
-                  />
-                </ListNav.Leaf>
-              ))
+              <>
+                {sidebarGroups[0]!.pendingChat && (
+                  <PendingChatLeaf pendingChat={sidebarGroups[0]!.pendingChat} />
+                )}
+                {sidebarGroups[0]!.chats.map(chat => (
+                  <ListNav.Leaf
+                    key={chat.id}
+                    id={`chat:${chat.id}`}
+                    kind="chat"
+                    onActivate={() => openChat(chat.id)}
+                  >
+                    <ChatSidebarItem
+                      chat={chat}
+                      canArchive={sidebarGroups[0]!.chats.length > 1}
+                    />
+                  </ListNav.Leaf>
+                ))}
+              </>
             ) : (
               sidebarGroups.map(group => (
                 <WorktreeBranch
                   key={group.scope.id}
                   scope={group.scope}
+                  pendingChat={group.pendingChat}
                   chats={group.chats}
                   multiGroupVisible={multiGroupVisible}
                   collapsed={collapsedGroups[group.scope.id] ?? false}
@@ -258,8 +273,48 @@ function pickWorkspaceAnchorDirectory(
 type Chat = ReturnType<typeof useSidebarGroups>[number]["chats"][number]
 type Scope = ReturnType<typeof useSidebarGroups>[number]["scope"]
 
+function PendingChatLeaf({ pendingChat }: { pendingChat: PendingSidebarChat }) {
+  return (
+    <ListNav.Leaf
+      key={pendingChat.id}
+      id={pendingChat.id}
+      kind="chat"
+      onActivate={() => requestFocusComposer(pendingChat.composerId)}
+    >
+      <PendingChatSidebarItem pendingChat={pendingChat} />
+    </ListNav.Leaf>
+  )
+}
+
+function PendingChatSidebarItem({
+  pendingChat,
+}: {
+  pendingChat: PendingSidebarChat
+}) {
+  const draftText = useDb(
+    root => root.app.chatStates[pendingChat.composerId]?.draft ?? "",
+  )
+  return (
+    <ChatTreeRow
+      label="New chat"
+      isGeneratingTitle={false}
+      isActive
+      isStreaming={false}
+      hasUnread={false}
+      hasDraft={draftText.trim().length > 0}
+      timestamp={null}
+      expandable={false}
+      isExpanded={false}
+      onToggleExpand={() => {}}
+      onClick={() => requestFocusComposer(pendingChat.composerId)}
+      treeContent={null}
+    />
+  )
+}
+
 function WorktreeBranch({
   scope,
+  pendingChat,
   chats,
   multiGroupVisible,
   collapsed,
@@ -267,6 +322,7 @@ function WorktreeBranch({
   openChat,
 }: {
   scope: Scope
+  pendingChat: PendingSidebarChat | null
   chats: Chat[]
   multiGroupVisible: boolean
   collapsed: boolean
@@ -282,7 +338,7 @@ function WorktreeBranch({
   const aggregates = useDb(root => {
     let isStreaming = false
     let hasUnread = false
-    let hasActive = false
+    let hasActive = pendingChat != null
     for (const chat of chats) {
       if (chat.id === activeChatId) hasActive = true
       if (chat.session.kind !== "ready") continue
@@ -381,6 +437,7 @@ function WorktreeBranch({
       }
     >
       <div className="flex flex-col gap-px [&_.hg-row]:!pl-6">
+        {pendingChat && <PendingChatLeaf pendingChat={pendingChat} />}
         {chats.map(chat => (
           <ListNav.Leaf
             key={chat.id}

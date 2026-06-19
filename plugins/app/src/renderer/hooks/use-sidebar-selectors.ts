@@ -2,6 +2,9 @@ import { useMemo } from "react"
 import { useDb, useInjections } from "@zenbujs/core/react"
 import type { WorkspaceRailEntry } from "../components/layout/workspace-rail"
 import { useActiveScopeId, useActiveView, useActiveWorkspaceId } from "@/lib/window-state/active-view"
+import { useWindowId } from "@/lib/window-state/window-id"
+import { pendingChatComposerId } from "@/lib/window-state/panes/tabs"
+import { isSidebarVisibleChat } from "@/lib/window-state/visibility"
 import { scopeForChat } from "@/lib/sidebar-helpers"
 import type { Schema } from "../../main/schema"
 import type { SelfDbSection as PiSchema } from "../../../.zenbu/types/deps/pi/db-sections"
@@ -20,8 +23,15 @@ export type ScopeRow = {
   worktree: Worktree | null
 }
 
+export type PendingSidebarChat = {
+  id: string
+  scopeId: string
+  composerId: string
+}
+
 export type SidebarGroup = {
   scope: Scope
+  pendingChat: PendingSidebarChat | null
   chats: Chat[]
   isStreaming: boolean
 }
@@ -87,10 +97,26 @@ export function useGlobalViewLabel(): string {
  * session and sorted by creation time (oldest first surfaces at
  * the top after the descending sort below). */
 export function useSidebarGroups(): SidebarGroup[] {
+  const windowId = useWindowId()
   const workspaceId = useActiveWorkspaceId()
   const chatsById = useDb(root => root.app.chats)
   const scopesById = useDb(root => root.app.scopes)
   const sessionsById = useDb(root => root.pi.sessions)
+  const activePendingChat = useDb<PendingSidebarChat | null>(root => {
+    const ws = root.app.windowStates[windowId]
+    const scopeId = ws?.selectedScopeId
+    if (!scopeId) return null
+    const state = ws.scopePanes?.[scopeId]
+    if (!state) return null
+    const pane = state.panes.find(p => p.id === state.activePaneId) ?? state.panes[0]
+    const tab = pane?.tabs.find(t => t.id === pane.activeTabId) ?? pane?.tabs[0]
+    if (tab?.content.kind !== "chat" || tab.content.chatId != null) return null
+    return {
+      id: `pending:${scopeId}:${pane.id}:${tab.id}`,
+      scopeId,
+      composerId: pendingChatComposerId(tab.id),
+    }
+  })
 
   return useMemo<SidebarGroup[]>(() => {
     if (!workspaceId) return []
@@ -128,7 +154,25 @@ export function useSidebarGroups(): SidebarGroup[] {
           sessionsById[c.session.sessionId]?.isStreaming,
       )
       const sorted = groupChats.slice().sort((a, b) => sortKey(b) - sortKey(a))
-      out.push({ scope, chats: sorted, isStreaming })
+      out.push({
+        scope,
+        pendingChat:
+          activePendingChat?.scopeId === scope.id ? activePendingChat : null,
+        chats: sorted,
+        isStreaming,
+      })
+    }
+
+    if (activePendingChat && !buckets.has(activePendingChat.scopeId)) {
+      const scope = scopeById.get(activePendingChat.scopeId)
+      if (scope) {
+        out.push({
+          scope,
+          pendingChat: activePendingChat,
+          chats: [],
+          isStreaming: false,
+        })
+      }
     }
 
     // Pinned scopes first by `pinnedAt`, then unpinned by
@@ -151,6 +195,7 @@ export function useSidebarGroups(): SidebarGroup[] {
     chatsById,
     scopesById,
     sessionsById,
+    activePendingChat,
   ])
 }
 
@@ -168,10 +213,10 @@ export function getSessionRowsInScope(
   const out: Chat[] = []
   for (const chat of Object.values(root.app.chats)) {
     if (chat.scopeId !== scopeId) continue
+    if (!isSidebarVisibleChat(root, chat.id)) continue
     if (chat.session.kind === "ready") {
       const sid = chat.session.sessionId
       if (seen.has(sid)) continue
-      if (root.pi.sessions[sid]?.archived) continue
       seen.add(sid)
     }
     out.push(chat)

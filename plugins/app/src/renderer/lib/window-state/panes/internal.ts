@@ -28,6 +28,10 @@ export function chatIdOf(
   return tab.content.kind === "chat" ? tab.content.chatId ?? null : null
 }
 
+export function pendingChatComposerId(tabId: string): string {
+  return `pending-chat:${tabId}`
+}
+
 /** Materialize a scope's pane layout, seeding it with the scope's
  * most-recent chat (or an empty chat tab if the scope has no chats
  * yet — `ChatPaneContainer` fills that in on first paint). */

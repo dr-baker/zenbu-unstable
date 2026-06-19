@@ -637,6 +637,7 @@ export async function deleteSession(args: {
   const { svc, sessionId } = args
   const live = svc.live.get(sessionId)
   if (live) {
+    await svc.ctx.piResourceRegistry.markRuntimeSnapshotInactive({ sessionId })
     live.dispose()
     svc.live.delete(sessionId)
   }
@@ -645,5 +646,6 @@ export async function deleteSession(args: {
     .catch(() => {})
   await svc.ctx.db.client.update(root => {
     delete root.pi.sessions[sessionId]
+    delete root.pi.sessionRuntimeSnapshots[sessionId]
   })
 }

@@ -64,6 +64,14 @@ export type OpenMode =
   | "split-right"
   | "split-left"
 
+export type EmptyChatTabResult = {
+  kind: "empty-chat"
+  scopeId: string
+  paneId: string
+  tabId: string
+  composerId: string
+}
+
 export type SplitPaneResult =
   | {
       kind: "chat"
@@ -72,6 +80,7 @@ export type SplitPaneResult =
       paneId: string
       needsSession: boolean
     }
+  | EmptyChatTabResult
   | {
       kind: "view"
       paneId: string

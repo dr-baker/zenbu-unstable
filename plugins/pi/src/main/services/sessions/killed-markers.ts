@@ -116,6 +116,13 @@ export async function snapshotKilledMarkersOnDispose(args: {
         console.warn("[sessions] dispose abort failed:", err)
       }
       try {
+        await svc.ctx.piResourceRegistry.markRuntimeSnapshotInactive({
+          sessionId: live.sessionId,
+        })
+      } catch (err) {
+        console.warn("[sessions] runtime snapshot inactive mark failed:", err)
+      }
+      try {
         live.dispose()
       } catch (err) {
         console.warn("[sessions] dispose threw:", err)

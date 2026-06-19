@@ -11,6 +11,7 @@ import type { EventBus, SlashCommandInfo } from "@earendil-works/pi-coding-agent
 
 import { AuthService } from "./auth"
 import { PiRuntimeService } from "./pi-runtime"
+import { PiResourceRegistryService } from "./pi-resource-registry"
 import { SessionActivityService } from "./session-activity"
 
 import { LiveSession, PROCESS_TOKEN } from "./sessions/live-session"
@@ -93,6 +94,7 @@ export class SessionsService extends Service.create({
     auth: AuthService,
     shellEnv: "shellEnv",
     piRuntime: PiRuntimeService,
+    piResourceRegistry: PiResourceRegistryService,
   },
 }) {
   /** In-memory live sessions, keyed by sessionId. Owned by this
@@ -301,6 +303,7 @@ export class SessionsService extends Service.create({
       streamingBehavior: live.pi.isStreaming ? "followUp" : undefined,
     })
     await stampLastMessageSent({ svc: this, sessionId: args.sessionId })
+    await this.syncRuntimeSnapshot(live)
     await syncRuntime({ svc: this, live })
   }
 
@@ -435,13 +438,18 @@ export class SessionsService extends Service.create({
 
   async compact(args: { sessionId: string; instructions?: string }) {
     const live = await this.ensureLive(args.sessionId)
-    return live.pi.compact(args.instructions)
+    try {
+      return await live.pi.compact(args.instructions)
+    } finally {
+      await syncRuntime({ svc: this, live })
+    }
   }
 
   async reload(args: { sessionId: string }): Promise<{ ok: true }> {
     const live = await this.ensureLive(args.sessionId)
     await live.pi.reload()
     await this.syncPiRuntimeCommands(live)
+    await this.syncRuntimeSnapshot(live)
     await syncRuntime({ svc: this, live })
     return { ok: true }
   }
@@ -744,6 +752,10 @@ export class SessionsService extends Service.create({
       sessionId: live.sessionId,
       commands,
     })
+  }
+
+  async syncRuntimeSnapshot(live: LiveSession): Promise<void> {
+    await this.ctx.piResourceRegistry.captureRuntimeSnapshot({ live })
   }
 
   /** Re-exported so helper modules can call it without importing

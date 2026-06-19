@@ -3,6 +3,7 @@ import { useDb, useDbClient } from "@zenbujs/core/react";
 import type { ActiveView } from "./types";
 import { useWindowId } from "./window-id";
 import { activeWorkspaceIdOf } from "./derived";
+import { isSidebarVisibleChat } from "./visibility";
 import { ensureWindowState } from "./ensure";
 import {
   selectChatInRoot,
@@ -47,19 +48,31 @@ export function useActiveChatId(): string | null {
       paneState.panes[0];
     const tab =
       pane?.tabs.find((t) => t.id === pane.activeTabId) ?? pane?.tabs[0];
-    if (tab?.content.kind === "chat" && tab.content.chatId) {
+    if (
+      tab?.content.kind === "chat" &&
+      tab.content.chatId &&
+      isSidebarVisibleChat(root, tab.content.chatId)
+    ) {
       return tab.content.chatId;
     }
     // Fall through: pick any chat tab visible in this scope's panes.
     for (const p of paneState.panes) {
       const active = p.tabs.find((t) => t.id === p.activeTabId) ?? p.tabs[0];
-      if (active?.content.kind === "chat" && active.content.chatId) {
+      if (
+        active?.content.kind === "chat" &&
+        active.content.chatId &&
+        isSidebarVisibleChat(root, active.content.chatId)
+      ) {
         return active.content.chatId;
       }
     }
     for (const p of paneState.panes) {
       for (const t of p.tabs) {
-        if (t.content.kind === "chat" && t.content.chatId)
+        if (
+          t.content.kind === "chat" &&
+          t.content.chatId &&
+          isSidebarVisibleChat(root, t.content.chatId)
+        )
           return t.content.chatId;
       }
     }
