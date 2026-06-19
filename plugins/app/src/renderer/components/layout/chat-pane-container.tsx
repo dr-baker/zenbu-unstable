@@ -9,9 +9,11 @@ import {
 } from "@zenbujs/core/react"
 import type { Schema } from "../../../main/schema"
 import { ChatPaneSlot } from "./chat-pane-slot"
+import { ChatDataWarmerSlot } from "./chat-data-warmer-slot"
 import { PaneFrame } from "./pane-frame"
 import { ChatTabs, type ChatTabEntry } from "./chat-tabs"
 import { chatLabel } from "@/lib/chat-label"
+import { chatWarmTargetsForPane, type ChatWarmStatus } from "@/lib/chat-warm-targets"
 import { useVisited } from "@/lib/hooks/use-visited"
 import type { PaneTabView, PaneView } from "@/lib/window-state/types"
 import { useWindowId } from "@/lib/window-state/window-id"
@@ -53,6 +55,10 @@ export function ChatPaneContainer({
 }: ChatPaneContainerProps) {
   const chatsById = useDb(root => root.app.chats)
   const sessionsById = useDb(root => root.pi.sessions)
+  const scopesById = useDb(root => root.app.scopes)
+  const showDebugWarmIndicators = useDb(
+    root => (root.app.settings as { perfTrace?: boolean }).perfTrace ?? false,
+  )
   const injections = useInjections()
 
   const [optimisticActiveTabId, setOptimisticActiveTabId] = useState<string | null>(null)
@@ -106,6 +112,21 @@ export function ChatPaneContainer({
     [injections],
   )
 
+  const [warmStatus, setWarmStatus] = useState<ChatWarmStatus>({
+    activeChatId: null,
+    queuedChatIds: [],
+    completedChatIds: [],
+    targetCount: 0,
+  })
+  const warmStateByChatId = useMemo(() => {
+    if (!showDebugWarmIndicators) return new Map<string, ChatTabEntry["warmState"]>()
+    const map = new Map<string, ChatTabEntry["warmState"]>()
+    for (const chatId of warmStatus.queuedChatIds) map.set(chatId, "queued")
+    for (const chatId of warmStatus.completedChatIds) map.set(chatId, "warm")
+    if (warmStatus.activeChatId) map.set(warmStatus.activeChatId, "warming")
+    return map
+  }, [showDebugWarmIndicators, warmStatus])
+
   const tabEntries = useMemo<ChatTabEntry[]>(
     () =>
       pane.tabs.map(t => {
@@ -158,9 +179,18 @@ export function ChatPaneContainer({
           isStreaming,
           hasUnread,
           isView: false,
+          warmState: chat ? warmStateByChatId.get(chat.id) : undefined,
         }
       }),
-    [pane.tabs, activeTabId, isActivePane, chatsById, sessionsById, viewLabelFor],
+    [
+      pane.tabs,
+      activeTabId,
+      isActivePane,
+      chatsById,
+      sessionsById,
+      viewLabelFor,
+      warmStateByChatId,
+    ],
   )
 
   const selectPane = useSelectPane()
@@ -238,6 +268,17 @@ export function ChatPaneContainer({
   const activeChatId = paneTabChatId(activeTab)
   const activeChat = activeChatId ? chatsById[activeChatId] : null
   const activeIsView = activeTab?.content.kind === "view"
+  const warmTargets = useMemo(
+    () =>
+      chatWarmTargetsForPane({
+        pane,
+        activeTabId,
+        scopeId,
+        chatsById,
+        scopesById,
+      }),
+    [pane, activeTabId, scopeId, chatsById, scopesById],
+  )
 
   // Safety net for two failure modes that manifest as "the chat
   // surface looks alive but Enter does nothing":
@@ -410,6 +451,11 @@ export function ChatPaneContainer({
           canClosePane={paneCount > 1}
         />
       )}
+      <ChatDataWarmerSlot
+        targets={warmTargets}
+        activeChatId={activeChatId}
+        onStatusChange={setWarmStatus}
+      />
       <div className="relative min-h-0 flex-1">
         {visitedTabs.map(tab => (
           <TabPanel

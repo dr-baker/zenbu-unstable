@@ -12,6 +12,10 @@ import {
   RUNTIME_COMMANDS_CHANNEL,
   type RuntimeCommandsPayload,
 } from "../../protocol"
+import {
+  runtimeCommandRowsForPayload,
+  runtimeCommandRowsMatch,
+} from "../lib/runtime-command-rows"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const EXTENSION_DIR = path.resolve(here, "../../extension")
@@ -165,22 +169,22 @@ export class PiRuntimeService extends Service.create({
   private async writeRuntimeCommands(data: unknown): Promise<void> {
     const payload = parseRuntimeCommandsPayload(data)
     if (!payload) return
+    const nextRows = runtimeCommandRowsForPayload(payload)
+    let changed = false
     await this.ctx.db.client.update(root => {
+      if (runtimeCommandRowsMatch(root.pi.runtimeCommands, payload.sessionId, nextRows)) {
+        return
+      }
+      changed = true
       for (const [id, command] of Object.entries(root.pi.runtimeCommands)) {
         if (command.sessionId === payload.sessionId) delete root.pi.runtimeCommands[id]
       }
-      for (const [index, command] of payload.commands.entries()) {
-        const id = `${payload.sessionId}:${command.source}:${command.name}:${index}`
-        root.pi.runtimeCommands[id] = {
-          id,
-          sessionId: payload.sessionId,
-          name: command.name,
-          description: command.description,
-          source: command.source,
-          sourceInfo: command.sourceInfo,
-        }
+      for (const row of nextRows) {
+        root.pi.runtimeCommands[row.id] = row
       }
     })
+    if (!changed) return
     for (const listener of this.runtimeCommandListeners) listener(payload)
   }
 }
+

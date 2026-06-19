@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import type { OAuthLoginCallbacks } from "@earendil-works/pi-ai"
 
+import { authProjectionMatches } from "../lib/auth-projection"
 import { preloadPackageProviders } from "../lib/preload-package-providers"
 
 // ---------------------------------------------------------------------------
@@ -494,6 +495,16 @@ export class AuthService extends Service.create({
       }
     }
     await this.ctx.db.client.update(root => {
+      if (
+        authProjectionMatches({
+          currentProviderStatuses: root.pi.providerStatuses,
+          nextProviderStatuses: next,
+          currentModels: root.pi.models,
+          nextModels,
+        })
+      ) {
+        return
+      }
       root.pi.providerStatuses = next
       root.pi.models = nextModels
     })
