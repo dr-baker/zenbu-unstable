@@ -1,6 +1,11 @@
 import { Service } from "@zenbujs/core/runtime"
 import { DbService } from "@zenbujs/core/services"
 
+export type SessionActivityListener = {
+  onOpened?(sessionId: string): void
+  onClosed?(sessionId: string): void
+}
+
 /**
  * Server-side derivation of "which sessions are currently being viewed
  * by the user, in any window". Subscribes to `windowStates` + `chats`
@@ -32,6 +37,13 @@ export class SessionActivityService extends Service.create({
    * idempotently on every db change without leaking refcount
    * drift if a window's pane state mutates in unexpected ways. */
   private readonly viewers = new Map<string, Set<string>>()
+  private readonly listeners = new Set<SessionActivityListener>()
+
+  /** Register for session enter/leave notifications from the viewer graph. */
+  registerListener(listener: SessionActivityListener): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
 
   evaluate() {
     this.setup("watch", () => {
@@ -64,12 +76,26 @@ export class SessionActivityService extends Service.create({
     const root = this.ctx.db.client.readRoot()
     const next = computeViewers(root)
     const opened = new Set<string>()
+    const closed = new Set<string>()
     for (const sessionId of next.keys()) {
       if (!this.viewers.has(sessionId)) opened.add(sessionId)
+    }
+    for (const sessionId of this.viewers.keys()) {
+      if (!next.has(sessionId)) closed.add(sessionId)
     }
     this.viewers.clear()
     for (const [sessionId, viewerKeys] of next) {
       this.viewers.set(sessionId, viewerKeys)
+    }
+    for (const sessionId of opened) {
+      for (const listener of this.listeners) {
+        listener.onOpened?.(sessionId)
+      }
+    }
+    for (const sessionId of closed) {
+      for (const listener of this.listeners) {
+        listener.onClosed?.(sessionId)
+      }
     }
     if (opened.size === 0) return
     const now = Date.now()

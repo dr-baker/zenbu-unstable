@@ -47,6 +47,16 @@ const STATIC_RESOURCE_KEYS = [
 ] as const
 const DIRTY_REFRESH_DEBOUNCE_MS = 250
 const WATCH_DEBOUNCE_MS = 250
+const PI_RESOURCE_WATCH_NAMES = new Set([
+  "settings.json",
+  "extensions",
+  "skills",
+  "prompts",
+  "themes",
+  "npm",
+  "git",
+])
+const RESOURCE_LAST_SEEN_WRITE_INTERVAL_MS = 60_000
 
 type StaticResourceKey = (typeof STATIC_RESOURCE_KEYS)[number]
 type ResourceDefinition = Schema["piResourceDefinitions"][string]
@@ -97,7 +107,11 @@ export class PiResourceRegistryService extends Service.create({
         this.ctx.db.client.pi.extensions,
         () => this.markAllStaticCatalogsDirty("zenbu-extension-change"),
       )
+      let selectedScopesKey = selectedWindowScopesKey(this.ctx.db.client.readRoot())
       const unsubWindows = this.ctx.db.client.app.windowStates.subscribe(() => {
+        const nextKey = selectedWindowScopesKey(this.ctx.db.client.readRoot())
+        if (nextKey === selectedScopesKey) return
+        selectedScopesKey = nextKey
         this.schedulePreloadedRefresh("focus-change")
       })
       return () => {
@@ -115,6 +129,9 @@ export class PiResourceRegistryService extends Service.create({
     scopeId: string
     reason?: string
   }): Promise<void> {
+    if (args.reason === "session-activate" && this.isStaticCatalogFresh(args.scopeId)) {
+      return
+    }
     const existing = this.refreshing.get(args.scopeId)
     if (existing) return existing
     const p = this.doRefreshStaticCatalog(args).finally(() => {
@@ -130,6 +147,22 @@ export class PiResourceRegistryService extends Service.create({
     })
     this.refreshing.set(args.scopeId, p)
     return p
+  }
+
+  private isStaticCatalogFresh(scopeId: string): boolean {
+    const root = this.ctx.db.client.readRoot()
+    const scope = root.app.scopes[scopeId]
+    const catalog = root.pi.piResourceStaticCatalogs[scopeId]
+    return (
+      !!scope &&
+      !!catalog &&
+      catalog.directory === scope.directory &&
+      catalog.workspaceId === scope.workspaceId &&
+      catalog.metadata.status === "idle" &&
+      catalog.metadata.resolverVersion === RESOLVER_VERSION &&
+      !!catalog.metadata.activationHash &&
+      !!catalog.metadata.staticCatalogHash
+    )
   }
 
   async markStaticCatalogDirty(args: {
@@ -469,29 +502,48 @@ export class PiResourceRegistryService extends Service.create({
   private reconcileWatchers(scopeIds: string[]) {
     const root = this.ctx.db.client.readRoot()
     const nextKeys = new Set<string>()
-    const add = (key: string, targetPath: string, scopeId: string | null) => {
+    const add = (
+      key: string,
+      targetPath: string,
+      scopeId: string | null,
+      options?: { childNames?: Set<string>; reason?: string },
+    ) => {
       nextKeys.add(key)
       if (this.watchers.has(key)) return
       if (!fs.existsSync(targetPath)) return
       try {
-        const watcher = watch(targetPath, { persistent: false }, () => {
-          this.scheduleWatcherDirty(scopeId, scopeId ? "project-pi-files" : "user-pi-files")
-        })
+        const watcher = watch(
+          targetPath,
+          { persistent: false },
+          (_event, filename) => {
+            if (
+              options?.childNames &&
+              !watchedChildMatches(filename, options.childNames)
+            ) {
+              return
+            }
+            this.scheduleWatcherDirty(
+              scopeId,
+              options?.reason ??
+                (scopeId ? "project-pi-files" : "user-pi-files"),
+            )
+          },
+        )
         this.watchers.set(key, watcher)
       } catch (err) {
         console.warn("[pi-resource-registry] failed to watch", targetPath, err)
       }
     }
 
-    for (const targetPath of globalWatchPaths()) {
-      add(`global:${targetPath}`, targetPath, null)
+    for (const target of globalWatchTargets()) {
+      add(`global:${target.path}`, target.path, null, target.options)
     }
 
     for (const scopeId of scopeIds) {
       const scope = root.app.scopes[scopeId]
       if (!scope) continue
-      for (const targetPath of projectWatchPaths(scope.directory)) {
-        add(`scope:${scopeId}:${targetPath}`, targetPath, scopeId)
+      for (const target of projectWatchTargets(scope.directory)) {
+        add(`scope:${scopeId}:${target.path}`, target.path, scopeId, target.options)
       }
     }
 
@@ -856,12 +908,26 @@ function upsertDefinitions(
   now: number,
   discovery: ResourceDiscovery,
 ) {
+  const uniqueObservations = new Map<string, ResourceObservation>()
   for (const observation of observations) {
+    uniqueObservations.set(observation.resourceId, observation)
+  }
+
+  for (const observation of uniqueObservations.values()) {
     const existing = definitions[observation.resourceId]
     if (existing) {
-      existing.discovery = mergeDiscovery(existing.discovery, discovery)
-      existing.label = observation.label ?? existing.label
-      existing.lastSeenAt = now
+      const nextDiscovery = mergeDiscovery(existing.discovery, discovery)
+      if (existing.discovery !== nextDiscovery) existing.discovery = nextDiscovery
+      const nextLabel = observation.label ?? existing.label
+      if (existing.label !== nextLabel) existing.label = nextLabel
+      // `lastSeenAt` is informational. Writing it on every static/runtime
+      // observation turns otherwise-idempotent catalog refreshes into hundreds
+      // of replica updates, which can starve chat rendering while an agent is
+      // active. Throttle the timestamp so real resource facts still update
+      // immediately while repeated scans stay cheap.
+      if (now - existing.lastSeenAt >= RESOURCE_LAST_SEEN_WRITE_INTERVAL_MS) {
+        existing.lastSeenAt = now
+      }
       continue
     }
     definitions[observation.resourceId] = {
@@ -1014,35 +1080,64 @@ function normalizePath(input: string): string {
   return path.resolve(input.replace(/^~(?=$|\/|\\)/, osHome()))
 }
 
-function globalWatchPaths(): string[] {
+type WatchTarget = {
+  path: string
+  options?: { childNames?: Set<string>; reason?: string }
+}
+
+function globalWatchTargets(): WatchTarget[] {
   const agentDir = getAgentDir()
-  const homeAgentsSkills = path.join(os.homedir(), ".agents", "skills")
+  const homeAgentsDir = path.join(os.homedir(), ".agents")
   return [
-    agentDir,
-    path.join(agentDir, "settings.json"),
-    path.join(agentDir, "extensions"),
-    path.join(agentDir, "skills"),
-    path.join(agentDir, "prompts"),
-    path.join(agentDir, "themes"),
-    path.join(agentDir, "npm"),
-    path.join(agentDir, "git"),
-    homeAgentsSkills,
+    // Watch the broad Pi config roots only as filtered parent directories.
+    // The agent dir also contains hot files such as run-history/session logs;
+    // reacting to every write there creates a refresh loop that floods the DB
+    // replica and can starve the chat composer.
+    { path: agentDir, options: { childNames: PI_RESOURCE_WATCH_NAMES } },
+    { path: path.join(agentDir, "settings.json") },
+    { path: path.join(agentDir, "extensions") },
+    { path: path.join(agentDir, "skills") },
+    { path: path.join(agentDir, "prompts") },
+    { path: path.join(agentDir, "themes") },
+    { path: path.join(agentDir, "npm") },
+    { path: path.join(agentDir, "git") },
+    { path: homeAgentsDir, options: { childNames: new Set(["skills"]) } },
+    { path: path.join(homeAgentsDir, "skills") },
   ]
 }
 
-function projectWatchPaths(directory: string): string[] {
+function projectWatchTargets(directory: string): WatchTarget[] {
   const piDir = path.join(directory, ".pi")
+  const agentsDir = path.join(directory, ".agents")
   return [
-    piDir,
-    path.join(piDir, "settings.json"),
-    path.join(piDir, "extensions"),
-    path.join(piDir, "skills"),
-    path.join(piDir, "prompts"),
-    path.join(piDir, "themes"),
-    path.join(piDir, "npm"),
-    path.join(piDir, "git"),
-    path.join(directory, ".agents", "skills"),
+    { path: piDir, options: { childNames: PI_RESOURCE_WATCH_NAMES } },
+    { path: path.join(piDir, "settings.json") },
+    { path: path.join(piDir, "extensions") },
+    { path: path.join(piDir, "skills") },
+    { path: path.join(piDir, "prompts") },
+    { path: path.join(piDir, "themes") },
+    { path: path.join(piDir, "npm") },
+    { path: path.join(piDir, "git") },
+    { path: agentsDir, options: { childNames: new Set(["skills"]) } },
+    { path: path.join(agentsDir, "skills") },
   ]
+}
+
+function watchedChildMatches(
+  filename: string | Buffer | null,
+  childNames: Set<string>,
+): boolean {
+  if (filename == null) return true
+  return childNames.has(path.basename(filename.toString()))
+}
+
+function selectedWindowScopesKey(root: {
+  app?: { windowStates?: Record<string, { selectedScopeId?: string | null }> }
+}): string {
+  return Object.values(root.app?.windowStates ?? {})
+    .map(ws => ws?.selectedScopeId ?? "")
+    .sort()
+    .join("\0")
 }
 
 function osHome(): string {

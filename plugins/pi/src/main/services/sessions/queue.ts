@@ -4,6 +4,7 @@ import type { SessionsService } from "../sessions"
 import type { LiveSession } from "./live-session"
 import { syncRuntime } from "./activation"
 import { appendUserPromptEvent } from "./event-log"
+import { withLiveSession } from "./live-access"
 import type { ImageRef, QueueKind, QueuedDraft } from "./types"
 
 type Svc = SessionsService
@@ -44,7 +45,7 @@ export async function prompt(args: {
   streamingBehavior?: "steer" | "followUp"
 }): Promise<void> {
   const { svc } = args
-  const live = await svc.ensureLive(args.sessionId)
+  return withLiveSession(svc, args.sessionId, async live => {
   // When streaming, route through the shadow so the QueuedMessages
   // panel sees this item. The renderer should normally call enqueue
   // directly, but supporting this path keeps callers that just say
@@ -78,6 +79,7 @@ export async function prompt(args: {
   // log" so onPiEvent doesn't synthesize a duplicate `user_prompt`.
   live.expectedUserMessages.push({ kind: "preStaged" })
   await live.pi.prompt(args.text, { images: args.images })
+  })
 }
 
 /**
@@ -96,7 +98,7 @@ export async function enqueue(args: {
   editorState?: unknown
 }): Promise<void> {
   const { svc } = args
-  const live = await svc.ensureLive(args.sessionId)
+  return withLiveSession(svc, args.sessionId, async live => {
   await withQueueLock({
     svc,
     sessionId: args.sessionId,
@@ -139,6 +141,7 @@ export async function enqueue(args: {
   // message sent" for sort purposes, even if pi hasn't drained
   // them yet.
   await stampLastMessageSent({ svc, sessionId: args.sessionId })
+  })
 }
 
 /**
@@ -156,7 +159,7 @@ export async function editQueued(args: {
   kind?: QueueKind
 }): Promise<void> {
   const { svc } = args
-  const live = await svc.ensureLive(args.sessionId)
+  return withLiveSession(svc, args.sessionId, async live => {
   await withQueueLock({
     svc,
     sessionId: args.sessionId,
@@ -174,6 +177,7 @@ export async function editQueued(args: {
       await replayShadowIntoPi({ svc, live, sessionId: args.sessionId })
     },
   })
+  })
 }
 
 export async function deleteQueued(args: {
@@ -182,7 +186,7 @@ export async function deleteQueued(args: {
   id: string
 }): Promise<void> {
   const { svc } = args
-  const live = await svc.ensureLive(args.sessionId)
+  return withLiveSession(svc, args.sessionId, async live => {
   await withQueueLock({
     svc,
     sessionId: args.sessionId,
@@ -194,6 +198,7 @@ export async function deleteQueued(args: {
       })
       await replayShadowIntoPi({ svc, live, sessionId: args.sessionId })
     },
+  })
   })
 }
 
@@ -212,7 +217,7 @@ export async function sendQueuedNow(args: {
   id: string
 }): Promise<void> {
   const { svc } = args
-  const live = await svc.ensureLive(args.sessionId)
+  return withLiveSession(svc, args.sessionId, async live => {
   const ctx = {
     db: svc.ctx.db.client,
     getLive: (id: string) => svc.live.get(id),
@@ -279,6 +284,7 @@ export async function sendQueuedNow(args: {
   })
   if (dispatched) await stampLastMessageSent({ svc, sessionId: args.sessionId })
   await syncRuntime({ svc, live })
+  })
 }
 
 /** Per-session async mutex protecting all queue mutations. Without
