@@ -1,5 +1,54 @@
 # App Plugin Decomposition
 
+## Status (2026-06-12)
+
+- **Phase 0 — DONE** on branch `app-decomposition`. Orphaned registry
+  deleted; pi-auto-commands consolidated to the user-install copy (hint
+  improvements ported, dead advice module removed); unguarded db reads
+  fixed. Bonus finds: `typecheck:all` per-plugin gate added (the root
+  typecheck checked almost nothing — plugin tsconfigs normalized to
+  extend root); **skill-pills had an infinite useSyncExternalStore
+  re-render loop** (nested-fresh-array useDb selector) — the likely
+  cause of the "can't interact with the IDE" reports; fixed + verified
+  with a clean renderer console.
+- **Phase 1 — DONE.** bash-timeout + zenbu-house-rules are path-based
+  built-ins in plugins/pi; `extensionFactories` deleted;
+  `plugins/pi/src/protocol.ts` (typed event-bus channels) added;
+  pi-event-log view moved to pi. Lane split per Finalized Decisions
+  (pi-auto-commands stays standalone/user-installed).
+- **Phase 2 — DONE.** sessions + auth + session-activity moved into
+  plugins/pi; lockstep renames across all consumers (see BREAKING.md);
+  data backfilled then app-side keys dropped, verified against the real
+  db (history + models intact); soft `runtime.get("piRuntime")` seam
+  replaced by a hard class dep. Commit 0.4's `_extensionRunner`
+  reach-in remains (deferred by decision).
+- **Phase Z — Z.1 + Z.2 + Z.3 committed** in `~/Developer/zenbu.js`
+  branch `advice-hardening` (advice error boundaries; blocked-service
+  diagnostics; stable advice target ids via `Service#adviceTarget` +
+  `advise({ target })`). **Not yet published/adopted** — app still
+  consumes @zenbujs/core 0.4.4 from npm; bump + publish is a user
+  call. Adopting target ids in the app waits on that release.
+- **Phase 3 — DONE (2026-06-12)** without the Z.3 prerequisite —
+  with one correction discovered post-landing: the advice registry is
+  EXACT-KEY, not suffix-matched (module ids are root-relative only
+  under the host renderer root; absolute elsewhere), so every adviser
+  targeting chat/composer modules silently detached on the move. All
+  five (pi-commands, plan, skill-pills, code-rendering,
+  research-tool-row) were migrated to resolve absolute module ids via
+  `getPlugin("chat").dir` (commit 281820d + per-plugin commits in
+  ~/.zenbu/plugins, which are now git repos with baselines). This
+  becomes unnecessary once core ships Z.3 target ids. Injections and
+  registry rows (cm-vim, footer items, slash registry) were never
+  affected. The app shell mounts the pane via the `"chat-pane"`
+  injection (`ChatPaneSlot`). Deviation
+  from the original sketch: `chats`/`chatStates`/`chatWindows` records
+  STAY in app — chatStates is written by pi branching and read by
+  sidebar plugins, so moving it would force cross-plugin section
+  writes either way; the chat plugin writing drafts into
+  `root.app.chatStates` is the one documented exception.
+- **Phase 4 — opportunistic by design, not started.** Each feature
+  view peels off as its area gets touched; no scheduled work remains.
+
 ## Goal
 
 Shrink `plugins/app` to a minimal shell (windows, layout, palette, generic

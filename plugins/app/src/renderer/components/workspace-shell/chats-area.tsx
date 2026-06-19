@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { Allotment } from "allotment"
 import { ChatPaneContainer } from "../layout/chat-pane-container"
-import { ChatPane } from "../chat/chat-pane"
+import { ChatPaneSlot } from "../layout/chat-pane-slot"
 import type { PaneView, ScopePaneStateView } from "@/lib/window-state/types"
 import { useActiveScopeId } from "@/lib/window-state/active-view"
 import { useScopePanes } from "@/lib/window-state/panes/hooks"
@@ -76,7 +76,7 @@ export function ChatsArea({
     return (
       <Allotment proportionalLayout>
         <Allotment.Pane key="__no_scope__" minSize={240}>
-          <ChatPane
+          <ChatPaneSlot
             chat={null}
             leftAdjacent={leftAdjacent}
             bottomAdjacent={bottomAdjacent}

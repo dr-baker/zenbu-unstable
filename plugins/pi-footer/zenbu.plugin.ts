@@ -24,12 +24,13 @@ import { definePlugin } from "@zenbujs/core/config";
  * indicator).
  *
  * Depends on `app` for typed access to the host's db
- * (`root.app.sessions`, `root.app.scopes`, `root.app.repos`,
- * `root.app.env.homeDir`) and RPC (`rpc.app.sessions.*`) used by
+ * (`root.pi.sessions`, `root.app.scopes`, `root.app.repos`,
+ * `root.app.env.homeDir`) and RPC (`rpc.pi.sessions.*`) used by
  * the two items.
  */
 export default definePlugin({
   name: "piFooter",
   services: ["./src/main/services/*.ts"],
-  dependsOn: [{ name: "app", from: "../../zenbu.config.ts" }],
+  dependsOn: [
+    { name: "pi", from: "../pi/zenbu.plugin.ts" },{ name: "app", from: "../../zenbu.config.ts" }],
 });

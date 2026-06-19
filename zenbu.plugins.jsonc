@@ -1,6 +1,7 @@
 {
 	"plugins": [
 		{ "path": "./plugins/app/zenbu.plugin.ts", "enabled": true },
+		{ "path": "./plugins/chat/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/pi/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/pi-commands/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/plan/zenbu.plugin.ts", "enabled": true },

@@ -165,12 +165,12 @@ function ContextPane({
   sessionId: string;
   scopeId: string | null;
 }) {
-  const session = useDb((root) => root.app.sessions[sessionId] ?? null);
+  const session = useDb((root) => root.pi.sessions[sessionId] ?? null);
   const modelInfo = useDb((root) => {
-    const s = root.app.sessions[sessionId];
+    const s = root.pi.sessions[sessionId];
     if (!s?.model) return null;
     const key = `${s.model.provider}:${s.model.id}`;
-    return root.app.models[key] ?? null;
+    return root.pi.models[key] ?? null;
   });
 
   if (!session) {

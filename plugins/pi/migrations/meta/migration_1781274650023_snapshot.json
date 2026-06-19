@@ -1,0 +1,54 @@
+{
+  "id": "f0e37920-a4b4-45ce-81f8-9c63589674e2",
+  "prevId": "12c88a84-6f8b-44b8-b1b2-aadda0fd614f",
+  "fields": {
+    "extensions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "cd6fcdb17433f9fc",
+      "default": {}
+    },
+    "runtimeCommands": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "223fb893d28e1c0e",
+      "default": {}
+    },
+    "sessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "98bc0df661838c39",
+      "default": {}
+    },
+    "killedSessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "66cebe4d7ce03cd7",
+      "default": {}
+    },
+    "pendingReloadToasts": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "8cd6790799910376",
+      "default": {}
+    },
+    "models": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "389f9537591154c4",
+      "default": {}
+    },
+    "providerStatuses": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "1bd52280e6584c5f",
+      "default": {}
+    },
+    "oauthFlow": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "b6c1ab19889b0d34",
+      "default": null
+    }
+  }
+}

@@ -3,16 +3,13 @@
   "compilerOptions": {
     "paths": {
       "@/*": [
-        "./src/*"
-      ],
-      "#registry/*": [
-        "./types/*"
+        "../app/src/renderer/*"
       ]
     }
   },
   "include": [
     "src",
-    "types",
+    "zenbu.plugin.ts",
     "./.zenbu/types/zenbu-register.ts"
   ]
 }

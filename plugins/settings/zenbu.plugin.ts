@@ -26,7 +26,8 @@ export default definePlugin({
   services: ["./src/main/services/*.ts"],
   schema: "./src/main/schema.ts",
   migrations: "./migrations",
-  dependsOn: [{ name: "app", from: "../../zenbu.config.ts" }],
+  dependsOn: [
+    { name: "pi", from: "../pi/zenbu.plugin.ts" },{ name: "app", from: "../../zenbu.config.ts" }],
   icons: {
     // lucide: settings
     settings:

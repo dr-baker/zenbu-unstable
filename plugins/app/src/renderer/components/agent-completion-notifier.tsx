@@ -31,7 +31,7 @@ export function AgentCompletionNotifier() {
   const windowId = useWindowId()
 
   useEffect(() => {
-    const off = events.app.agentCompletedUnviewed.subscribe(
+    const off = events.pi.agentCompletedUnviewed.subscribe(
       ({ sessionId, chatId, label }) => {
         // Stable toast id per session so a rapid burst of turns
         // (or one user re-prompting before clicking) replaces the

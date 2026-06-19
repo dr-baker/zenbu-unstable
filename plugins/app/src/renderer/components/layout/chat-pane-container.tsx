@@ -8,7 +8,7 @@ import {
   useRpc,
 } from "@zenbujs/core/react"
 import type { Schema } from "../../../main/schema"
-import { ChatPane } from "../chat/chat-pane"
+import { ChatPaneSlot } from "./chat-pane-slot"
 import { PaneFrame } from "./pane-frame"
 import { ChatTabs, type ChatTabEntry } from "./chat-tabs"
 import { chatLabel } from "@/lib/chat-label"
@@ -50,7 +50,7 @@ export function ChatPaneContainer({
   paneCount,
 }: ChatPaneContainerProps) {
   const chatsById = useDb(root => root.app.chats)
-  const sessionsById = useDb(root => root.app.sessions)
+  const sessionsById = useDb(root => root.pi.sessions)
   const injections = useInjections()
 
   const activeTab = useMemo<PaneTabView | null>(
@@ -231,7 +231,7 @@ export function ChatPaneContainer({
       const guardKey = `${activeTab.id}:${activeChat.id}`
       if (filledTabRef.current === guardKey) return
       filledTabRef.current = guardKey
-      void rpc.app.sessions
+      void rpc.pi.sessions
         .createChatSession({
           scopeId: activeChat.scopeId,
           chatId: activeChat.id,
@@ -269,7 +269,7 @@ export function ChatPaneContainer({
         )
       })
       .then(() => {
-        void rpc.app.sessions
+        void rpc.pi.sessions
           .createChatSession({ scopeId, chatId })
           .catch(err =>
             console.error("[chat-pane] auto createChatSession failed:", err),
@@ -395,7 +395,7 @@ function TabPanel({
             />
           </PaneFrame>
         ) : (
-          <ChatPane
+          <ChatPaneSlot
             chat={chat}
             leftAdjacent={leftAdjacent}
             bottomAdjacent={bottomAdjacent}

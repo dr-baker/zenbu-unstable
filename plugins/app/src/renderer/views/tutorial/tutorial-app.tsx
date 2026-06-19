@@ -283,7 +283,7 @@ function TutorialBody() {
           })
           if (out.value) {
             try {
-              await rpc.app.sessions.createChatSession({
+              await rpc.pi.sessions.createChatSession({
                 scopeId: out.value.scopeId,
                 chatId: out.value.chatId,
               })

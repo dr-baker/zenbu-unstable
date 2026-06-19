@@ -12,9 +12,10 @@ import {
 } from "@/lib/window-state/selection"
 import { requestFocusComposer } from "@/lib/focus-composer"
 import type { Schema } from "@host/main/schema"
+import type { SelfDbSection as PiSchema } from "../../.zenbu/types/deps/pi/db-sections"
 
 type Chat = Schema["chats"][string]
-type Session = Schema["sessions"][string]
+type Session = PiSchema["sessions"][string]
 
 /**
  * Cmd+P recent-agents palette.
@@ -62,7 +63,7 @@ export function RecentAgentsPalette() {
   const activeWorkspaceId = useActiveWorkspaceId()
   const chats = useDb(root => Object.values(root.app.chats))
   const scopesById = useDb(root => root.app.scopes)
-  const sessionsById = useDb(root => root.app.sessions)
+  const sessionsById = useDb(root => root.pi.sessions)
   const activeChatId = useDb(root => activeChatIdOf(root, windowId))
 
   // Active session id (null for pending / no chat). Used only to

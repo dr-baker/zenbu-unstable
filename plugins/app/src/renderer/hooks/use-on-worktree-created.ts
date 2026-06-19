@@ -84,7 +84,7 @@ export function useOnWorktreeCreated() {
         selectChatInRoot(root, windowId, chatId)
       })
       .then(() => {
-        void rpc.app.sessions
+        void rpc.pi.sessions
           .createChatSession({ scopeId: finalScopeId, chatId })
           .catch(err =>
             console.error(

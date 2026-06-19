@@ -13,14 +13,14 @@ import {
 
 /**
  * Per-provider status row owned by the app plugin
- * (`root.app.providerStatuses[id]`). Pulled out via
+ * (`root.pi.providerStatuses[id]`). Pulled out via
  * `ReturnType` of the `useDb` selector so we stay in sync with
  * whatever the app schema exposes through the `dependsOn: app`
  * typed surface — no manual mirroring.
  */
 type Status = ReturnType<typeof useStatuses>[string]
 function useStatuses() {
-  return useDb(root => root.app.providerStatuses)
+  return useDb(root => root.pi.providerStatuses)
 }
 
 type CatalogEntry = {
@@ -46,7 +46,7 @@ export function AccountsPanel() {
 
   useEffect(() => {
     let cancelled = false
-    rpc.app.auth
+    rpc.pi.auth
       .listCatalog()
       .then(entries => {
         if (!cancelled) setCatalog(entries)
@@ -203,7 +203,7 @@ function SubscriptionAction({
 
   const onConnect = async () => {
     try {
-      await rpc.app.auth.startOAuthLogin({ providerId: entry.id })
+      await rpc.pi.auth.startOAuthLogin({ providerId: entry.id })
     } catch (err) {
       console.error("[accounts] startOAuthLogin failed:", err)
     }
@@ -211,7 +211,7 @@ function SubscriptionAction({
 
   const onDisconnect = async () => {
     try {
-      await rpc.app.auth.removeAuth({ providerId: entry.id })
+      await rpc.pi.auth.removeAuth({ providerId: entry.id })
       setShowApiKey(false)
     } catch (err) {
       console.error("[accounts] removeAuth failed:", err)
@@ -302,7 +302,7 @@ function ApiKeyInline({
     if (!value.trim()) return
     setSaving(true)
     try {
-      await rpc.app.auth.setApiKey({ providerId: entry.id, key: value })
+      await rpc.pi.auth.setApiKey({ providerId: entry.id, key: value })
       setValue("")
       onClose?.()
     } catch (err) {
@@ -364,7 +364,7 @@ function ApiKeyAction({
 
   const onRemove = async () => {
     try {
-      await rpc.app.auth.removeAuth({ providerId: entry.id })
+      await rpc.pi.auth.removeAuth({ providerId: entry.id })
     } catch (err) {
       console.error("[accounts] removeAuth failed:", err)
     }

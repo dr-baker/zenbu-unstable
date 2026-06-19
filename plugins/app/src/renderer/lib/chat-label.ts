@@ -1,7 +1,8 @@
 import type { Schema } from "../../main/schema"
+import type { SelfDbSection as PiSchema } from "../../../.zenbu/types/deps/pi/db-sections"
 
 type Chat = Schema["chats"][string]
-type Session = Schema["sessions"][string]
+type Session = PiSchema["sessions"][string]
 
 /** Chat display label. Pi's session file owns the canonical
  * name; Zenbu mirrors it into `session.title` for cheap renderer

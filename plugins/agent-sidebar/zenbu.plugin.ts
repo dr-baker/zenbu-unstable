@@ -26,7 +26,8 @@ export default definePlugin({
   schema: "./src/main/schema.ts",
   migrations: "./migrations",
   events: "./src/main/events.ts",
-  dependsOn: [{ name: "app", from: "../../zenbu.config.ts" }],
+  dependsOn: [
+    { name: "pi", from: "../pi/zenbu.plugin.ts" },{ name: "app", from: "../../zenbu.config.ts" }],
   icons: {
     // lucide: message-square — matches the chat-bubble glyph used
     // elsewhere in the app for "a chat".

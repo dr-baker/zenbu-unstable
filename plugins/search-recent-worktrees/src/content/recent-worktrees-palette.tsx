@@ -88,7 +88,7 @@ function RecentWorktreesPalette() {
   const activeChatId = useActiveChatId()
   const chatsById = useDb((root) => root.app.chats)
   const scopesById = useDb((root) => root.app.scopes)
-  const sessionsById = useDb((root) => root.app.sessions)
+  const sessionsById = useDb((root) => root.pi.sessions)
   const reposById = useDb((root) => root.app.repos)
 
   // The repo backing the active workspace (used for nice branch

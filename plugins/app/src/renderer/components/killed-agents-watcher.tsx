@@ -26,8 +26,8 @@ import { Button } from "@zenbu/ui/button"
  * propagating back as an empty array.
  */
 export function KilledAgentsWatcher() {
-  const killed = useDb(root => Object.values(root.app.killedSessions))
-  const reloads = useDb(root => Object.values(root.app.pendingReloadToasts))
+  const killed = useDb(root => Object.values(root.pi.killedSessions))
+  const reloads = useDb(root => Object.values(root.pi.pendingReloadToasts))
   const rpc = useRpc()
   const shownKilledRef = useRef<Set<string>>(new Set())
   const shownReloadRef = useRef<Set<string>>(new Set())
@@ -40,7 +40,7 @@ export function KilledAgentsWatcher() {
     for (const k of fresh) shownKilledRef.current.add(k.sessionId)
 
     const sessionIds = fresh.map(k => k.sessionId)
-    void rpc.app.sessions
+    void rpc.pi.sessions
       .acknowledgeKilledMarkers({ sessionIds })
       .catch(err =>
         console.error(
@@ -70,7 +70,7 @@ export function KilledAgentsWatcher() {
               size="sm"
               onClick={() => {
                 toast.dismiss(id)
-                void rpc.app.sessions.continueKilled({ sessionIds })
+                void rpc.pi.sessions.continueKilled({ sessionIds })
               }}
             >
               {continueLabel}
@@ -105,7 +105,7 @@ export function KilledAgentsWatcher() {
     for (const k of fresh) shownReloadRef.current.add(k.sessionId)
 
     const sessionIds = fresh.map(k => k.sessionId)
-    void rpc.app.sessions
+    void rpc.pi.sessions
       .acknowledgeReloadToasts({ sessionIds })
       .catch(err =>
         console.error(

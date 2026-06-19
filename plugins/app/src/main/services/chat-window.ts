@@ -11,33 +11,22 @@ import { buildContextMenuPrepend } from "../lib/context-menu-prepend"
 const CHAT_WINDOW_ID = "chat-stack"
 
 /**
- * Registers the `"chat-window"` view (aliased over the renderer's vite
- * server so it shares tailwind / theme vars, same trick as file-tree
- * and pi-event-log) and exposes `open()` / `closeTab()` /
- * `activateTab()` RPCs that drive the tab strip.
+ * Window management for the standalone chat-tab window: `open()` /
+ * `closeTab()` / `activateTab()` RPCs that drive the tab strip.
  *
- * Tab state lives in `root.app.chatWindows[CHAT_WINDOW_ID]` so it
- * survives reloads and is rendered straight from the DB replica with
- * no extra round trips.
+ * The `"chat-window"` VIEW itself is registered by the chat plugin
+ * (`ChatSurfaceService`) — this service only opens windows that point
+ * at that injection name. Tab state lives in
+ * `root.app.chatWindows[CHAT_WINDOW_ID]` so it survives reloads and
+ * is rendered straight from the DB replica with no extra round trips.
  */
 export class ChatWindowService extends Service.create({
   key: "chatWindow",
   deps: {
     window: WindowService,
     db: DbService,
-    // server live before we point at one of its sub-paths.
   },
 }) {
-  evaluate() {
-    this.setup("register-view", () =>
-      this.inject({
-        name: "chat-window",
-        modulePath: "src/renderer/views/chat-window/chat-window-app.tsx",
-        exportName: "ChatWindowApp",
-        meta: { kind: "view", label: "Chat" },
-      }),
-    )
-  }
 
   /**
    * Open (or focus) the shared chat window with `chatId` added as a

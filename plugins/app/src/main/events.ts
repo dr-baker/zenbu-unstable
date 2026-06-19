@@ -125,12 +125,8 @@ export type Events = {
     composerId: string;
     text: string;
   };
-  /** Session completed (not currently viewed); triggers notification toast */
-  agentCompletedUnviewed: {
-    sessionId: string
-    chatId: string | null
-    label: string
-  }
+  // `agentCompletedUnviewed` moved to the `pi` plugin with the
+  // sessions services (events.pi.agentCompletedUnviewed).
   // `playExit` also moved to the `play` plugin (see note above).
   /**
    * Cmd+0 — focus the agent sidebar. Fired regardless of context so

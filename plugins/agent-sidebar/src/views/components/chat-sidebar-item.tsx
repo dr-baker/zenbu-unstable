@@ -35,7 +35,7 @@ export function ChatSidebarItem({ chat, canArchive }: ChatSidebarItemProps) {
     chat.session.kind === "ready" ? chat.session.sessionId : null
 
   const session = useDb(root =>
-    sessionId ? root.app.sessions[sessionId] : undefined,
+    sessionId ? root.pi.sessions[sessionId] : undefined,
   )
   const { label } = resolveChatLabel(chat, session)
 

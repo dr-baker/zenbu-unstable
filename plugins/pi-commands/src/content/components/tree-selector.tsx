@@ -88,7 +88,7 @@ export type TreeSelectorProps = {
    * cursor and (b) order forks so the active branch goes first. */
   activeLeafId: string | null
   /** Picked an entry AND the summary choice. The caller forwards
-   * this to `rpc.app.sessions.navigateTree` directly — there is no
+   * this to `rpc.pi.sessions.navigateTree` directly — there is no
    * separate modal step. */
   onConfirm: (args: {
     entryId: string
@@ -171,7 +171,7 @@ export function TreeSelector({
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    rpc.app.sessions
+    rpc.pi.sessions
       .getEntryTree({ sessionId })
       .then(res => {
         if (cancelled) return

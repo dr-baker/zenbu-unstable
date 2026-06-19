@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Service } from "@zenbujs/core/runtime";
+import { Service, getPlugin } from "@zenbujs/core/runtime";
 import { RpcService } from "@zenbujs/core/services";
 
 // TODO(cross-plugin-deps): zenbu's `deps:` accepts either a service
@@ -105,20 +105,25 @@ export class PlanService extends Service.create({
     );
 
     // 3. Replace host's `ToolCall` chat component for plan tool calls.
-    // `moduleId` must be the full path the host renderer registers
-    // under (i.e. relative to the host's vite root,
-    // `packages/app/src/renderer/`). Short suffixes silently do not
-    // match — the advice runtime now emits a `console.error`
-    // pointing at the right value when it detects a mismatch.
-    this.setup("advise-tool-call", () =>
-      this.advise({
-        moduleId: "components/chat/messages/tool-call.tsx",
+    // `moduleId` must be the absolute filesystem path that the chat
+    // plugin's renderer registers (files outside the host vite root
+    // use their absolute path as the module id, not a vite-root-relative
+    // one). We resolve it against getPlugin("chat").dir at registration
+    // time; falls back to the old relative id when the chat plugin isn't
+    // loaded so the advice no-ops harmlessly.
+    this.setup("advise-tool-call", () => {
+      const chatDir = getPlugin("chat")?.dir;
+      const toolCallModuleId = chatDir
+        ? path.join(chatDir, "src/renderer/components/chat/messages/tool-call.tsx")
+        : "components/chat/messages/tool-call.tsx";
+      return this.advise({
+        moduleId: toolCallModuleId,
         name: "ToolCall",
         type: "around",
         modulePath: "./src/content/plan-tool-advice.tsx",
         exportName: "PlanToolAdvice",
-      }),
-    );
+      });
+    });
   }
 
   /**

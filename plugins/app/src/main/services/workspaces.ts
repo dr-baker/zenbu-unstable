@@ -5,12 +5,20 @@ import { DbService, WindowService } from "@zenbujs/core/services"
 import { skeletonRouteForActiveView } from "../../shared/boot-skeleton"
 import { buildContextMenuPrepend } from "../lib/context-menu-prepend"
 import { ReposService } from "./repos"
-import { SessionsService } from "./sessions"
 import { WorkspaceIconService } from "./workspace-icon"
 import type { Schema } from "../schema"
 
 type WindowState = Schema["windowStates"][string]
 type ScopePaneState = WindowState["scopePanes"][string]
+
+/** Structural slice of the pi plugin's SessionsService (string-key
+ * dep; service keys are global, see plugins/pi). */
+type SessionsApi = {
+  createChatSession(args: {
+    scopeId: string
+    chatId: string
+  }): Promise<{ sessionId: string }>
+}
 
 /**
  * Owns the "create a workspace from a directory" flow.
@@ -47,7 +55,7 @@ export class WorkspacesService extends Service.create({
   deps: {
     db: DbService,
     repos: ReposService,
-    sessions: SessionsService,
+    sessions: "sessions",
     workspaceIcon: WorkspaceIconService,
     window: WindowService,
   },
@@ -256,7 +264,7 @@ export class WorkspacesService extends Service.create({
     // Same process, same replica. `createChatSession` will read
     // the scope and chat we just wrote without going through any
     // sync boundary.
-    const { sessionId } = await this.ctx.sessions.createChatSession({
+    const { sessionId } = await (this.ctx.sessions as SessionsApi).createChatSession({
       scopeId,
       chatId,
     })

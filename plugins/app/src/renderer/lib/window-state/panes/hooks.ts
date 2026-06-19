@@ -71,7 +71,7 @@ export function useAddTab() {
         })
         .then(() => {
           if (!result) return
-          void rpc.app.sessions
+          void rpc.pi.sessions
             .createChatSession({ scopeId: result.scopeId, chatId: result.chatId })
             .catch(err =>
               console.error("[panes] addTab createChatSession failed:", err),
@@ -95,7 +95,7 @@ export function useCloseTab() {
         })
         .then(() => {
           if (!result) return
-          void rpc.app.sessions
+          void rpc.pi.sessions
             .createChatSession({ scopeId: result.scopeId, chatId: result.chatId })
             .catch(err =>
               console.error("[panes] closeTab createChatSession failed:", err),
@@ -119,7 +119,7 @@ export function useAddPane() {
         })
         .then(() => {
           if (!result) return
-          void rpc.app.sessions
+          void rpc.pi.sessions
             .createChatSession({ scopeId: result.scopeId, chatId: result.chatId })
             .catch(err =>
               console.error("[panes] addPane createChatSession failed:", err),

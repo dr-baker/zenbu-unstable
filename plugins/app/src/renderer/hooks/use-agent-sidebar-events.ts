@@ -142,7 +142,7 @@ export function useAgentSidebarEvents() {
         })
         .then(() => {
           if (result?.kind === "chat" && result.needsSession) {
-            void rpc.app.sessions
+            void rpc.pi.sessions
               .createChatSession({
                 scopeId: result.scopeId,
                 chatId: result.chatId,
@@ -164,7 +164,7 @@ export function useAgentSidebarEvents() {
         })
         .then(() => {
           if (result?.kind !== "chat") return;
-          void rpc.app.sessions
+          void rpc.pi.sessions
             .createChatSession({
               scopeId: result.scopeId,
               chatId: result.chatId,
@@ -190,7 +190,7 @@ export function useAgentSidebarEvents() {
         })
         .then(() => {
           if (result?.kind !== "chat") return;
-          void rpc.app.sessions
+          void rpc.pi.sessions
             .createChatSession({
               scopeId: result.scopeId,
               chatId: result.chatId,

@@ -286,7 +286,7 @@ function WorktreeBranch({
     for (const chat of chats) {
       if (chat.id === activeChatId) hasActive = true
       if (chat.session.kind !== "ready") continue
-      const s = root.app.sessions[chat.session.sessionId]
+      const s = root.pi.sessions[chat.session.sessionId]
       if (!s) continue
       if (s.isStreaming) isStreaming = true
       if (!hasActive && activeChatId != null && chat.id !== activeChatId) {
