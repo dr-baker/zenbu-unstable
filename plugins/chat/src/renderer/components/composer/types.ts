@@ -1,5 +1,14 @@
 export type FileEntry = { path: string; name: string }
 
+export type FileEntryProvider = {
+  /** Changes when the backing path collection changes. */
+  version: string
+  /** Search lazily for typeahead results without materializing every entry. */
+  search: (query: string, limit: number) => FileEntry[]
+  /** Build/return the full path set only when pill validation needs it. */
+  getPathSet: () => ReadonlySet<string>
+}
+
 export type ComposerIntent = "default" | "steer" | "followUp"
 
 export type SlashCommand = {

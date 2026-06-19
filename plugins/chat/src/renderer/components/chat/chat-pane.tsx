@@ -14,6 +14,7 @@ import { ChatTitleBar } from "./chat-title-bar"
 import { InvariantOverlay } from "./devtools/invariant-overlay"
 import { useMessageDeliveryInvariant } from "./devtools/use-message-delivery-invariant"
 import { materializeMessages } from "./lib/materialize"
+import { getCachedSegmentedMaterializedMessages } from "./lib/materialized-message-cache"
 import { QueuedMessages } from "./queued-messages"
 import { WorkspaceSelector } from "./workspace-selector"
 import { WorktreeHandoffSelector } from "./worktree-handoff-selector"
@@ -21,11 +22,12 @@ import { Composer, type ComposerSubmitPayload } from "../composer/composer"
 import { useChatDraft } from "./lib/use-chat-draft"
 import type { AgentConfig } from "../composer/composer-toolbar"
 import type { ComboboxOption } from "../composer/combobox"
-import type { FileEntry, SlashCommand } from "../composer/types"
+import type { FileEntryProvider, SlashCommand } from "../composer/types"
 import { cn } from "@/lib/utils"
 import { ErrorBoundary } from "@/components/common/error-boundary"
 import { PiFooter } from "../pi-footer/pi-footer"
 import { FileIndexContext } from "./lib/file-index-context"
+import { createFileEntryProvider } from "../composer/lib/file-entry-provider"
 import { perfTrace, type PerfTraceContext } from "@/lib/perf-trace"
 import { ChatAuthCard } from "@/components/auth/chat-auth-card"
 import {
@@ -272,16 +274,6 @@ export function ChatPane({
   )
   const filePathsTrace = collectionTraceInfo(filePathsRef)
   const { items: filePathItems } = useCollection(filePathsRef)
-  const filePaths = useMemo(
-    () =>
-      perfTrace.spanForSubject(
-        traceSubjectKey,
-        "chat.file_paths.map",
-        () => filePathItems.map(item => item.path),
-        { itemCount: filePathItems.length, collectionId: filePathsTrace.id },
-      ),
-    [filePathItems, traceSubjectKey, filePathsTrace.id],
-  )
 
   const lastEventLogTraceRef = useRef<string | null>(null)
   useEffect(() => {
@@ -421,23 +413,14 @@ export function ChatPane({
   const chatWorkspaceId = useDb(root =>
     effectiveScopeId ? root.app.scopes[effectiveScopeId]?.workspaceId ?? null : null,
   )
-  const files = useMemo<FileEntry[]>(() => {
-    return perfTrace.spanForSubject(
-      traceSubjectKey,
-      "chat.file_entries.derive",
-      () => {
-        if (!filePaths) return []
-        const out: FileEntry[] = new Array(filePaths.length)
-        for (let i = 0; i < filePaths.length; i++) {
-          const p = filePaths[i]!
-          const slash = p.lastIndexOf("/")
-          out[i] = { path: p, name: slash >= 0 ? p.slice(slash + 1) : p }
-        }
-        return out
-      },
-      { pathCount: filePaths.length },
-    )
-  }, [filePaths, traceSubjectKey])
+  const fileProvider = useMemo<FileEntryProvider>(
+    () =>
+      createFileEntryProvider(
+        filePathItems,
+        `${filePathsTrace.id}:${filePathItems.length}`,
+      ),
+    [filePathItems, filePathsTrace.id],
+  )
 
   const currentModelValue =
     session?.model ? `${session.model.provider}/${session.model.id}` : pendingModelValue
@@ -880,6 +863,25 @@ export function ChatPane({
     })
   }
 
+  const materializedCacheKey = useMemo(
+    () => ({
+      sessionId,
+      collectionId: eventLogTrace.id,
+      directory: chatDirectory,
+      extraDirectories: chatExtraDirectories,
+      workspaceId: chatWorkspaceId,
+      scopeId: chatScopeId,
+    }),
+    [
+      sessionId,
+      eventLogTrace.id,
+      chatDirectory,
+      chatExtraDirectories,
+      chatWorkspaceId,
+      chatScopeId,
+    ],
+  )
+
   const messages = useMemo(() => {
     if (!session) return []
     const span = perfTrace.startSpanForSubject(
@@ -893,14 +895,45 @@ export function ChatPane({
       },
     )
     try {
-      const materialized = materializeMessages(events, {
-        directory: chatDirectory,
-        extraDirectories: chatExtraDirectories,
-        workspaceId: chatWorkspaceId,
-        scopeId: chatScopeId,
+      const materialized = getCachedSegmentedMaterializedMessages(
+        events,
+        materializedCacheKey,
+      )
+      span?.end({
+        messageCount: materialized.messages.length,
+        cacheHit: materialized.cacheHit,
+        eventShape: materialized.eventShape,
+        strategy: materialized.strategy,
+        stableSegmentCount: materialized.stableSegmentCount,
+        stableSegmentCacheHits: materialized.stableSegmentCacheHits,
+        tailEventCount: materialized.tailEventCount,
+        fallbackReason: materialized.fallbackReason,
       })
-      span?.end({ messageCount: materialized.length })
-      return materialized
+      if (materialized.strategy === "stable-reveal") {
+        perfTrace.markForSubject(traceSubjectKey, "chat.messages.cached_reveal", {
+          messageCount: materialized.messages.length,
+          sessionId,
+          collectionId: eventLogTrace.id,
+          stableOnly: true,
+        })
+      } else if (materialized.strategy === "segmented") {
+        perfTrace.markForSubject(traceSubjectKey, "chat.messages.segmented", {
+          messageCount: materialized.messages.length,
+          sessionId,
+          collectionId: eventLogTrace.id,
+          stableSegmentCount: materialized.stableSegmentCount,
+          stableSegmentCacheHits: materialized.stableSegmentCacheHits,
+          tailEventCount: materialized.tailEventCount,
+        })
+      } else if (materialized.strategy === "full-fallback") {
+        perfTrace.markForSubject(traceSubjectKey, "chat.messages.full_fallback", {
+          messageCount: materialized.messages.length,
+          sessionId,
+          collectionId: eventLogTrace.id,
+          reason: materialized.fallbackReason,
+        })
+      }
+      return materialized.messages
     } catch (err) {
       span?.end({ error: traceError(err) })
       throw err
@@ -909,11 +942,11 @@ export function ChatPane({
     events,
     session,
     sessionId,
-    chatDirectory,
-    chatExtraDirectories,
     chatWorkspaceId,
     chatScopeId,
     traceSubjectKey,
+    eventLogTrace.id,
+    materializedCacheKey,
   ])
 
   // Detector for the "sent a message, it didn't render" class of
@@ -1483,7 +1516,7 @@ export function ChatPane({
       <ChatBackgroundLayer url={backgroundUrl} opacity={background?.opacity} />
       {showChatDevtools && chat ? <InvariantOverlay chatId={chat.id} /> : null}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-        <FileIndexContext.Provider value={files}>
+        <FileIndexContext.Provider value={fileProvider}>
         {/* Only render the chat's own title bar when nothing sits
          * above us. If a tab strip is above (`topAdjacent`), the tab
          * itself already carries the chat label — stacking a second
@@ -1505,6 +1538,7 @@ export function ChatPane({
               streaming={streaming}
               loadingStats={loadingStats}
               traceSubjectKey={traceSubjectKey}
+              scrollStateKey={composerBindingId}
               scrollToBottomRef={scrollToBottomRef}
               onHasOverflowChange={setChatHasOverflow}
               onEditSubmit={handleEditSubmit}
@@ -1609,7 +1643,7 @@ export function ChatPane({
                 initialText={initialText}
                 onDraftChange={onDraftChange}
                 onSubmit={handleSubmit}
-                files={files}
+                fileProvider={fileProvider}
                 slashCommands={slashCommands}
                 traceSubjectKey={traceSubjectKey}
                 onSlashAction={handleSlashAction}

@@ -120,7 +120,7 @@ export function UserMessage({
   // Bubble's outer chip \u2014 used as the focus boundary for the
   // auto-exit-on-blur effect below.
   const bubbleRef = useRef<HTMLDivElement>(null)
-  const files = useContext(FileIndexContext)
+  const fileProvider = useContext(FileIndexContext)
 
   // Auto-revert to read-only when focus leaves the bubble while
   // we're in the live-editor stage. The CodeMirror editor lives
@@ -345,7 +345,7 @@ export function UserMessage({
               // just-edited text so the preview matches what's about
               // to be sent.
               initialText={editing ? content : previewContent}
-              files={files}
+              fileProvider={fileProvider}
               placeholder="Edit and press Enter \u2192 pick summary"
               onSubmit={editing ? handleComposerSubmit : NOOP_SUBMIT}
               // Pre-select the whole bubble on edit-mount so the

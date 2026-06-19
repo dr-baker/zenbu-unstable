@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state"
 import {
   EditorView,
@@ -25,7 +25,7 @@ import { ComposerToolbar, type AgentConfig } from "./composer-toolbar"
 import { rankEntries } from "./lib/fuzzy"
 import { getImageBytes } from "./lib/image-cache"
 import { downscaleImage } from "./lib/downscale-image"
-import type { ComposerIntent, FileEntry, SlashCommand } from "./types"
+import type { ComposerIntent, FileEntry, FileEntryProvider, SlashCommand } from "./types"
 import { perfTrace } from "@/lib/perf-trace"
 
 export type ComposerSubmitPayload = {
@@ -68,8 +68,10 @@ export type ComposerProps = {
   /** Fired on every doc change with the full doc text. Use this to
    * persist drafts; the caller is responsible for debouncing. */
   onDraftChange?: (text: string) => void
-  /** Static file list for the `@`-mention typeahead. */
+  /** Static file list for the `@`-mention typeahead (legacy callers). */
   files?: FileEntry[]
+  /** Lazy file provider for the `@`-mention typeahead and pill validation. */
+  fileProvider?: FileEntryProvider | null
   /** Static slash command list for the `/` typeahead. */
   slashCommands?: SlashCommand[]
   onSlashAction?: (action: string) => void
@@ -314,6 +316,7 @@ export function Composer({
   initialText,
   onDraftChange,
   files = [],
+  fileProvider = null,
   slashCommands = [],
   onSlashAction,
   agentConfigs,
@@ -439,17 +442,38 @@ export function Composer({
   dbClientFieldRef.current = dbClient
 
   const filesRef = useRef(files)
+  const fileProviderRef = useRef<FileEntryProvider | null>(fileProvider)
+  const loadedFileIndexVersionRef = useRef<string | null>(null)
   const slashRef = useRef(slashCommands)
   const onSubmitRef = useRef(onSubmit)
   const onSlashActionRef = useRef(onSlashAction)
   const menuRef = useRef<MenuState>(menu)
   const selectedIndexRef = useRef(selectedIndex)
   filesRef.current = files
+  fileProviderRef.current = fileProvider
   slashRef.current = slashCommands
   onSubmitRef.current = onSubmit
   onSlashActionRef.current = onSlashAction
   menuRef.current = menu
   selectedIndexRef.current = selectedIndex
+
+  const ensureFileIndex = useCallback((view: EditorView | null) => {
+    if (!view) return
+    const provider = fileProviderRef.current
+    const version = provider?.version ?? `legacy:${filesRef.current.length}`
+    if (loadedFileIndexVersionRef.current === version) return
+    const set = provider
+      ? provider.getPathSet()
+      : new Set(filesRef.current.map(f => f.path))
+    view.dispatch({ effects: setFileIndexEffect.of(set) })
+    loadedFileIndexVersionRef.current = version
+  }, [])
+
+  const searchFileEntries = useCallback((query: string, limit: number) => {
+    const provider = fileProviderRef.current
+    if (provider) return provider.search(query, limit)
+    return rankEntries(filesRef.current, query, f => f.path, limit).map(r => r.entry)
+  }, [])
 
   const recomputeMenu = useMemo(
     () => (state: EditorState, view: EditorView | null) => {
@@ -486,14 +510,9 @@ export function Composer({
         prev.query === trigger.query
 
       if (trigger.kind === "file") {
-        // Rank the full path; fuzzy.ts already biases the basename.
-        const ranked = rankEntries(
-          filesRef.current,
-          trigger.query,
-          f => f.path,
-          MAX_FILE_RESULTS,
-        )
-        if (ranked.length === 0) {
+        // Search the full path; fuzzy.ts already biases the basename.
+        const options = searchFileEntries(trigger.query, MAX_FILE_RESULTS)
+        if (options.length === 0) {
           setMenu(null)
           setSelectedIndex(0)
           return
@@ -501,14 +520,14 @@ export function Composer({
         const anchor = view ? caretAnchor(view, trigger.from) : null
         setMenu({
           kind: "file",
-          options: ranked.map(r => r.entry),
+          options,
           from: trigger.from,
           to: trigger.to,
           query: trigger.query,
           anchor,
         })
         setSelectedIndex(
-          sameRun ? i => Math.min(i, ranked.length - 1) : 0,
+          sameRun ? i => Math.min(i, options.length - 1) : 0,
         )
       } else {
         const ranked = rankEntries(
@@ -534,7 +553,7 @@ export function Composer({
         )
       }
     },
-    [],
+    [searchFileEntries],
   )
 
   /**
@@ -578,6 +597,7 @@ export function Composer({
   const insertFile = (entry: FileEntry, from: number, to: number) => {
     const view = viewRef.current
     if (!view) return
+    ensureFileIndex(view)
     // The doc just gets the canonical text — `@<filePath>` followed by a
     // space. Decoration is derived from the doc contents, so the pill
     // appears automatically. No side state to update.
@@ -872,6 +892,7 @@ export function Composer({
     view.dispatch({
       effects: setDbClientEffect.of(dbClientFieldRef.current),
     })
+    if (seed.includes("@")) ensureFileIndex(view)
     if (!isReadOnly) {
       view.focus()
       // Optionally select the whole seeded doc so the first
@@ -928,7 +949,7 @@ export function Composer({
       view.destroy()
       viewRef.current = null
     }
-  }, [placeholder, recomputeMenu])
+  }, [placeholder, recomputeMenu, ensureFileIndex])
 
   useEffect(() => {
     const view = viewRef.current
@@ -966,20 +987,22 @@ export function Composer({
       changes: { from: 0, to: view.state.doc.length, insert: seed },
       selection: { anchor: seed.length },
     })
+    if (seed.includes("@")) ensureFileIndex(view)
     setMenu(null)
     setSelectedIndex(0)
-  }, [composerKey])
+  }, [composerKey, ensureFileIndex])
 
-  // Push the latest file index into the editor state whenever the
-  // surrounding `files` prop changes. The decoration computer reads
-  // from this field to validate `@<path>` tokens.
+  // Push the latest file index into the editor state only when the
+  // current document can actually render file pills. This keeps normal
+  // tab reveals from building a full path Set unless the user has typed
+  // or restored an `@file` reference.
   useEffect(() => {
+    loadedFileIndexVersionRef.current = null
     const view = viewRef.current
     if (!view) return
-    const set = new Set<string>()
-    for (const f of files) set.add(f.path)
-    view.dispatch({ effects: setFileIndexEffect.of(set) })
-  }, [files])
+    if (!view.state.doc.toString().includes("@")) return
+    ensureFileIndex(view)
+  }, [files, fileProvider, ensureFileIndex])
 
   // Plugin-contributed CodeMirror extensions live inside a
   // Compartment so we can reconfigure them without remounting the

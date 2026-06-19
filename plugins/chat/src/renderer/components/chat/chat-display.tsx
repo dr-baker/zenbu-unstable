@@ -13,6 +13,13 @@ import {
 import type { MessageComponents } from "./message-components"
 import { perfTrace } from "@/lib/perf-trace"
 
+type SavedChatDisplayScroll = {
+  metrics: ScrollMetrics
+  distanceFromBottom: number
+}
+
+const chatDisplayScrollState = new Map<string, SavedChatDisplayScroll>()
+
 export type ChatDisplayProps = {
   messages: MaterializedMessage[]
   streaming: boolean
@@ -21,6 +28,8 @@ export type ChatDisplayProps = {
    * just forwards. */
   loadingStats: LoadingStats
   traceSubjectKey?: string | null
+  /** Stable chat/composer id used to restore scroll after dormant tab remounts. */
+  scrollStateKey?: string | null
   components?: Partial<MessageComponents>
   onPermissionSelect?: (requestId: string, optionId: string | "__cancel__") => void
   /** Fired when the user submits an in-place edit of a past user
@@ -63,6 +72,7 @@ export function ChatDisplay({
   streaming,
   loadingStats,
   traceSubjectKey,
+  scrollStateKey,
   components,
   onPermissionSelect,
   onEditSubmit,
@@ -117,7 +127,31 @@ export function ChatDisplay({
   ])
 
   const listRef = useRef<MessageListHandle>(null)
-  const [scrollMetrics, setScrollMetrics] = useState<ScrollMetrics | null>(null)
+  const savedScroll = scrollStateKey
+    ? chatDisplayScrollState.get(scrollStateKey) ?? null
+    : null
+  const [scrollMetrics, setScrollMetrics] = useState<ScrollMetrics | null>(
+    savedScroll?.metrics ?? null,
+  )
+  const initialScrollTop =
+    savedScroll && savedScroll.distanceFromBottom > 4
+      ? savedScroll.metrics.scrollTop
+      : null
+  const handleScrollMetrics = useCallback(
+    (metrics: ScrollMetrics) => {
+      setScrollMetrics(metrics)
+      if (scrollStateKey) {
+        chatDisplayScrollState.set(scrollStateKey, {
+          metrics,
+          distanceFromBottom: Math.max(
+            0,
+            metrics.scrollHeight - metrics.clientHeight - metrics.scrollTop,
+          ),
+        })
+      }
+    },
+    [scrollStateKey],
+  )
 
   // Id of the most recent tool call across the *un-windowed*
   // message list. Threaded through MessageList → ToolCall →
@@ -194,7 +228,8 @@ export function ChatDisplay({
         loadingStats={loadingStats}
         traceSubjectKey={traceSubjectKey}
         components={mergedComponents}
-        onScrollMetrics={setScrollMetrics}
+        onScrollMetrics={handleScrollMetrics}
+        initialScrollTop={initialScrollTop}
         hasMoreAbove={hasMoreBefore}
         hasMoreBelow={hasMoreAfter}
         onLoadOlder={loadOlder}
