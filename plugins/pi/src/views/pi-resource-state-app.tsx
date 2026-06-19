@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useDb, useRpc, type ViewComponentProps } from "@zenbujs/core/react"
 
 type PiResourceStateArgs = {
@@ -37,6 +37,22 @@ type ActiveContext = {
   directory: string | null
 }
 
+type DetailMode =
+  | { group: "loaded"; type: ResourceTypeKey }
+  | { group: "workspace"; type: ResourceTypeKey }
+  | { group: "issues"; type: IssueType }
+  | { group: "capabilities"; type: "commands" | "tools" }
+
+type ResourceTypeKey = "extension" | "skill" | "prompt" | "theme"
+type IssueType = "missing" | "suppressed" | "errors"
+
+const RESOURCE_TYPES: Array<{ key: ResourceTypeKey; label: string }> = [
+  { key: "extension", label: "Extensions" },
+  { key: "skill", label: "Skills" },
+  { key: "prompt", label: "Prompts" },
+  { key: "theme", label: "Themes" },
+]
+
 export function PiResourceStateApp({ args }: ViewComponentProps<PiResourceStateArgs>) {
   const rpc = useRpc()
   const active = useActiveContext(args)
@@ -55,13 +71,47 @@ export function PiResourceStateApp({ args }: ViewComponentProps<PiResourceStateA
     currentActivationHash: data.staticCatalog?.metadata.activationHash,
   })
 
-  const staticCounts = useMemo(
-    () => countStaticEntries(data.staticCatalog?.entries ?? []),
+  const [mode, setMode] = useState<DetailMode>({ group: "loaded", type: "extension" })
+  const workspaceStaticEntries = useMemo(
+    () => (data.staticCatalog?.entries ?? []).filter(isWorkspaceSpecificResource),
     [data.staticCatalog?.entries],
   )
-  const runtimeCounts = useMemo(
-    () => countRuntimeEntries(data.snapshot?.resources ?? []),
+  const workspaceRuntimeEntries = useMemo(
+    () => (data.snapshot?.resources ?? []).filter(isWorkspaceSpecificResource),
     [data.snapshot?.resources],
+  )
+  const workspaceErrors = useMemo(
+    () =>
+      (data.snapshot?.errors ?? []).filter((error: { path?: string }) =>
+        isWorkspaceSpecificError(error, active.directory),
+      ),
+    [data.snapshot?.errors, active.directory],
+  )
+  const staticCounts = useMemo(
+    () => countStaticEntries(workspaceStaticEntries),
+    [workspaceStaticEntries],
+  )
+  const runtimeCounts = useMemo(
+    () => countRuntimeEntries(workspaceRuntimeEntries),
+    [workspaceRuntimeEntries],
+  )
+  const issueCounts = useMemo(
+    () => ({
+      missing: workspaceStaticEntries.filter(entry => entry.activationState === "missing").length,
+      suppressed: workspaceStaticEntries.filter(entry => entry.activationState === "suppressed").length,
+      errors: workspaceErrors.length,
+    }),
+    [workspaceStaticEntries, workspaceErrors.length],
+  )
+  const detail = useMemo(
+    () => buildDetail({
+      mode,
+      snapshot: data.snapshot,
+      staticCatalog: data.staticCatalog,
+      definitions: data.definitions,
+      directory: active.directory,
+    }),
+    [mode, data.snapshot, data.staticCatalog, data.definitions, active.directory],
   )
 
   if (!active.scopeId) {
@@ -85,88 +135,60 @@ export function PiResourceStateApp({ args }: ViewComponentProps<PiResourceStateA
       <header className="border-b border-border px-3 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">Pi resources</h2>
+            <h2 className="truncate text-sm font-semibold">Pi Resources</h2>
             <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
               {active.directory ?? data.staticCatalog?.directory ?? "No directory"}
             </div>
           </div>
           <button
-            className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            className="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             onClick={refreshCatalog}
           >
             Refresh
           </button>
         </div>
-        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-          <Badge tone={data.snapshot?.active ? "good" : "muted"}>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+          <Badge tone={data.snapshot?.active ? "good" : data.snapshot ? "muted" : "warn"} title={statusTitle(data.snapshot, data.staticCatalog, active.directory)}>
             {data.snapshot?.active ? "live" : data.snapshot ? "cached" : "no session"}
           </Badge>
-          {stale ? <Badge tone="warn">stale activation</Badge> : null}
-          <Badge tone={data.staticCatalog?.metadata.status === "error" ? "bad" : "muted"}>
-            catalog {data.staticCatalog?.metadata.status ?? "missing"}
+          {stale ? <Badge tone="warn" title={statusTitle(data.snapshot, data.staticCatalog, active.directory)}>stale</Badge> : null}
+          <Badge tone={data.staticCatalog?.metadata.status === "error" ? "bad" : "muted"} title={statusTitle(data.snapshot, data.staticCatalog, active.directory)}>
+            inventory {data.staticCatalog?.metadata.status ?? "missing"}
           </Badge>
+          {stale && active.sessionId ? (
+            <button className="ml-auto text-[11px] text-amber-700 underline dark:text-amber-300" onClick={reloadSession}>
+              Reload
+            </button>
+          ) : null}
         </div>
-        {stale ? (
-          <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-300">
-            This session loaded a different activation set than the current static catalog.
-            {active.sessionId ? (
-              <button className="ml-2 underline" onClick={reloadSession}>Reload session</button>
-            ) : null}
-          </div>
-        ) : null}
       </header>
 
-      <section className="space-y-3 p-3">
-        <Card title="Runtime snapshot" subtitle={snapshotSubtitle(data.snapshot)}>
-          {data.snapshot ? (
-            <>
-              <div className="grid grid-cols-4 gap-2 text-center text-[11px]">
-                <Metric label="resources" value={data.snapshot.resources.length} />
-                <Metric label="commands" value={data.snapshot.capabilities.commands.length} />
-                <Metric label="tools" value={data.snapshot.capabilities.tools.length} />
-                <Metric label="errors" value={data.snapshot.errors.length} tone={data.snapshot.errors.length ? "bad" : "normal"} />
-              </div>
-              <ResourceCountList counts={runtimeCounts} />
-              <CapabilityList
-                title="Commands"
-                items={data.snapshot.capabilities.commands}
-                definitions={data.definitions}
-              />
-              <ToolList
-                title="Tools"
-                items={data.snapshot.capabilities.tools}
-                definitions={data.definitions}
-              />
-              <ErrorList errors={data.snapshot.errors} />
-            </>
-          ) : (
-            <p className="text-[12px] text-muted-foreground">
-              No runtime snapshot yet. Opening this chat is still cheap; Pi will refresh this when the session activates.
-            </p>
-          )}
-        </Card>
-
-        <Card title="Static catalog" subtitle={catalogSubtitle(data.staticCatalog)}>
-          {data.staticCatalog ? (
-            <>
-              <div className="grid grid-cols-4 gap-2 text-center text-[11px]">
-                <Metric label="active" value={staticCounts.active} />
-                <Metric label="disabled" value={staticCounts.disabled} />
-                <Metric label="suppressed" value={staticCounts.suppressed} />
-                <Metric label="missing" value={staticCounts.missing} tone={staticCounts.missing ? "bad" : "normal"} />
-              </div>
-              <ResourceCountList counts={staticCounts.byType} />
-              <StaticEntryList
-                entries={data.staticCatalog.entries}
-                definitions={data.definitions}
-              />
-            </>
-          ) : (
-            <p className="text-[12px] text-muted-foreground">
-              Static catalog has not been resolved for this scope yet.
-            </p>
-          )}
-        </Card>
+      <section className="space-y-4 p-3">
+        <OverviewSection
+          title="Loaded from workspace"
+          counts={runtimeCounts}
+          selected={mode.group === "loaded" ? mode.type : null}
+          onSelect={type => setMode({ group: "loaded", type })}
+        />
+        <OverviewSection
+          title="Available from workspace"
+          counts={staticCounts.byType}
+          selected={mode.group === "workspace" ? mode.type : null}
+          onSelect={type => setMode({ group: "workspace", type })}
+        />
+        {(issueCounts.missing || issueCounts.suppressed || issueCounts.errors) ? (
+          <IssueSection counts={issueCounts} selected={mode.group === "issues" ? mode.type : null} onSelect={type => setMode({ group: "issues", type })} />
+        ) : null}
+        {data.snapshot ? (
+          <div className="border-t border-border pt-3">
+            <div className="mb-2 text-[11px] font-medium text-muted-foreground">Capabilities</div>
+            <div className="flex flex-wrap gap-1.5">
+              <SelectorPill active={mode.group === "capabilities" && mode.type === "commands"} count={data.snapshot.capabilities.commands.length} onClick={() => setMode({ group: "capabilities", type: "commands" })}>Commands</SelectorPill>
+              <SelectorPill active={mode.group === "capabilities" && mode.type === "tools"} count={data.snapshot.capabilities.tools.length} onClick={() => setMode({ group: "capabilities", type: "tools" })}>Tools</SelectorPill>
+            </div>
+          </div>
+        ) : null}
+        <DetailPanel detail={detail} />
       </section>
     </div>
   )
@@ -233,6 +255,18 @@ function resolveChatIdFromPaneState(paneState: any): string | null {
   return null
 }
 
+function isWorkspaceSpecificResource(entry: ResourceEntry): boolean {
+  return entry.sourceInfo?.scope === "project" || entry.tier === "pi-project"
+}
+
+function isWorkspaceSpecificError(
+  error: { path?: string | null },
+  directory: string | null | undefined,
+): boolean {
+  if (!directory || !error.path) return true
+  return error.path === directory || error.path.startsWith(`${directory}/`)
+}
+
 function countStaticEntries(entries: ResourceEntry[]) {
   const counts = {
     active: 0,
@@ -270,156 +304,229 @@ function isActivationStale(args: {
   )
 }
 
-function snapshotSubtitle(snapshot: any): string {
-  if (!snapshot) return "No cached runtime data"
-  const when = new Date(snapshot.capturedAt).toLocaleString()
-  return snapshot.active ? `Captured live ${when}` : `Last loaded ${when}`
+function statusTitle(snapshot: any, catalog: any, directory: string | null | undefined): string {
+  const runtime = snapshot?.capturedAt
+    ? `Runtime captured: ${new Date(snapshot.capturedAt).toLocaleString()}`
+    : "Runtime captured: none"
+  const inventory = catalog?.metadata?.resolvedAt
+    ? `Workspace inventory refreshed: ${new Date(catalog.metadata.resolvedAt).toLocaleString()}`
+    : `Workspace inventory: ${catalog?.metadata?.status ?? "missing"}`
+  return `${runtime}\n${inventory}\nDirectory: ${directory ?? catalog?.directory ?? "No directory"}`
 }
 
-function catalogSubtitle(catalog: any): string {
-  if (!catalog) return "Not resolved"
-  if (catalog.metadata.error) return catalog.metadata.error
-  if (!catalog.metadata.resolvedAt) return catalog.metadata.status
-  return `Resolved ${new Date(catalog.metadata.resolvedAt).toLocaleString()}`
-}
-
-function Card({
+function OverviewSection({
   title,
-  subtitle,
-  children,
+  counts,
+  selected,
+  onSelect,
 }: {
   title: string
-  subtitle?: string
-  children: React.ReactNode
+  counts: Map<string, number>
+  selected: ResourceTypeKey | null
+  onSelect: (type: ResourceTypeKey) => void
 }) {
-  return (
-    <div className="rounded-lg border border-border bg-card text-card-foreground">
-      <div className="border-b border-border px-3 py-2">
-        <div className="text-[12px] font-semibold">{title}</div>
-        {subtitle ? <div className="mt-0.5 text-[11px] text-muted-foreground">{subtitle}</div> : null}
-      </div>
-      <div className="space-y-3 p-3">{children}</div>
-    </div>
-  )
-}
-
-function Metric({
-  label,
-  value,
-  tone = "normal",
-}: {
-  label: string
-  value: number
-  tone?: "normal" | "bad"
-}) {
-  return (
-    <div className="rounded border border-border p-2">
-      <div className={tone === "bad" ? "font-semibold text-destructive" : "font-semibold"}>{value}</div>
-      <div className="text-muted-foreground">{label}</div>
-    </div>
-  )
-}
-
-function ResourceCountList({ counts }: { counts: Map<string, number> }) {
-  if (counts.size === 0) return null
-  return (
-    <div className="flex flex-wrap gap-1 text-[11px]">
-      {[...counts.entries()].sort().map(([type, count]) => (
-        <Badge key={type} tone="muted">{type}: {count}</Badge>
-      ))}
-    </div>
-  )
-}
-
-function CapabilityList({
-  title,
-  items,
-  definitions,
-}: {
-  title: string
-  items: RuntimeCommand[]
-  definitions: Record<string, { label?: string | null; canonicalPath?: string }>
-}) {
-  if (items.length === 0) return null
-  return (
-    <List title={title}>
-      {items.slice(0, 12).map(item => (
-        <Row
-          key={`${item.source}:${item.name}`}
-          title={`/${item.name}`}
-          subtitle={item.description ?? definitionLabel(item.resourceId, definitions)}
-          meta={item.source}
-        />
-      ))}
-    </List>
-  )
-}
-
-function ToolList({
-  title,
-  items,
-  definitions,
-}: {
-  title: string
-  items: RuntimeTool[]
-  definitions: Record<string, { label?: string | null; canonicalPath?: string }>
-}) {
-  if (items.length === 0) return null
-  return (
-    <List title={title}>
-      {items.slice(0, 12).map(item => (
-        <Row
-          key={item.name}
-          title={item.name}
-          subtitle={item.description ?? definitionLabel(item.resourceId, definitions)}
-          meta={item.active ? "active" : "inactive"}
-        />
-      ))}
-    </List>
-  )
-}
-
-function StaticEntryList({
-  entries,
-  definitions,
-}: {
-  entries: ResourceEntry[]
-  definitions: Record<string, { label?: string | null; canonicalPath?: string }>
-}) {
-  const visible = entries.slice(0, 16)
-  if (visible.length === 0) return null
-  return (
-    <List title="Catalog entries">
-      {visible.map(entry => (
-        <Row
-          key={`${entry.resourceType}:${entry.resourceId}:${entry.sourceInfo?.source}`}
-          title={definitionLabel(entry.resourceId, definitions) ?? entry.resourceId}
-          subtitle={entry.sourceInfo?.path}
-          meta={`${entry.resourceType} · ${entry.activationState}`}
-        />
-      ))}
-    </List>
-  )
-}
-
-function ErrorList({ errors }: { errors: Array<{ path: string; error: string }> }) {
-  if (errors.length === 0) return null
-  return (
-    <List title="Errors">
-      {errors.slice(0, 8).map((error, index) => (
-        <Row key={`${error.path}:${index}`} title={error.error} subtitle={error.path} meta="error" />
-      ))}
-    </List>
-  )
-}
-
-function List({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">{title}</div>
-      <div className="space-y-1">{children}</div>
+      <div className="mb-2 text-[11px] font-medium text-muted-foreground">{title}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {RESOURCE_TYPES.map(type => (
+          <SelectorPill key={type.key} active={selected === type.key} count={resourceCount(counts, type.key)} onClick={() => onSelect(type.key)}>
+            {type.label}
+          </SelectorPill>
+        ))}
+      </div>
     </div>
   )
+}
+
+function IssueSection({
+  counts,
+  selected,
+  onSelect,
+}: {
+  counts: Record<IssueType, number>
+  selected: IssueType | null
+  onSelect: (type: IssueType) => void
+}) {
+  const issues: Array<{ key: IssueType; label: string }> = [
+    { key: "missing", label: "Missing" },
+    { key: "suppressed", label: "Suppressed" },
+    { key: "errors", label: "Errors" },
+  ]
+  return (
+    <div className="border-t border-border pt-3">
+      <div className="mb-2 text-[11px] font-medium text-muted-foreground">Issues</div>
+      <div className="flex flex-wrap gap-1.5">
+        {issues.filter(issue => counts[issue.key] > 0).map(issue => (
+          <SelectorPill key={issue.key} active={selected === issue.key} count={counts[issue.key]} onClick={() => onSelect(issue.key)}>
+            {issue.label}
+          </SelectorPill>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SelectorPill({ active, count, onClick, children }: { active: boolean; count: number; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-muted/40 text-muted-foreground hover:bg-accent hover:text-accent-foreground"}`}
+      onClick={onClick}
+    >
+      {children} <span className={active ? "text-primary-foreground/75" : "text-muted-foreground"}>{count}</span>
+    </button>
+  )
+}
+
+function DetailPanel({
+  detail,
+}: {
+  detail: {
+    title: string
+    subtitle: string
+    emptyText?: string
+    rows: Array<{ key: string; title: string; subtitle?: string | null; meta?: string | null }>
+  }
+}) {
+  return (
+    <div className="border-t border-border pt-3">
+      <div className="mb-2">
+        <div className="text-[12px] font-semibold">{detail.title}</div>
+        <div className="text-[11px] text-muted-foreground">{detail.subtitle}</div>
+      </div>
+      {detail.rows.length ? (
+        <div className="space-y-1.5">
+          {detail.rows.map(row => <Row key={row.key} title={row.title} subtitle={row.subtitle} meta={row.meta} />)}
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-border px-3 py-4 text-[12px] text-muted-foreground">
+          {detail.emptyText ?? "Nothing to show here yet."}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function buildDetail({
+  mode,
+  snapshot,
+  staticCatalog,
+  definitions,
+  directory,
+}: {
+  mode: DetailMode
+  snapshot: any
+  staticCatalog: any
+  definitions: Record<string, { label?: string | null; canonicalPath?: string }>
+  directory: string | null
+}) {
+  if (mode.group === "loaded") {
+    const rows = (snapshot?.resources ?? [])
+      .filter(isWorkspaceSpecificResource)
+      .filter((entry: ResourceEntry) => isResourceType(entry.resourceType, mode.type))
+      .map((entry: ResourceEntry) => resourceRow(entry, definitions, "loaded"))
+    return {
+      title: `Loaded workspace ${pluralResourceLabel(mode.type).toLowerCase()}`,
+      subtitle: `${rows.length} project-scoped resources loaded in this chat`,
+      emptyText: "No workspace-specific resources of this type are loaded in the active chat.",
+      rows,
+    }
+  }
+  if (mode.group === "workspace") {
+    const rows = (staticCatalog?.entries ?? [])
+      .filter(isWorkspaceSpecificResource)
+      .filter((entry: ResourceEntry) => isResourceType(entry.resourceType, mode.type))
+      .map((entry: ResourceEntry) => resourceRow(entry, definitions, entry.activationState ?? "available"))
+    return {
+      title: `Available workspace ${pluralResourceLabel(mode.type).toLowerCase()}`,
+      subtitle: `${rows.length} project-scoped resources in workspace inventory`,
+      emptyText: "No workspace-specific resources of this type were found for this workspace.",
+      rows,
+    }
+  }
+  if (mode.group === "issues") {
+    if (mode.type === "errors") {
+      const rows = (snapshot?.errors ?? [])
+        .filter((error: { path?: string }) => isWorkspaceSpecificError(error, directory))
+        .map((error: { path: string; error: string }, index: number) => ({
+        key: `${error.path}:${index}`,
+        title: error.error,
+        subtitle: error.path,
+        meta: "error",
+      }))
+      return {
+        title: "Workspace resource errors",
+        subtitle: `${rows.length} project-scoped runtime errors`,
+        emptyText: "No workspace-specific runtime resource errors.",
+        rows,
+      }
+    }
+    const rows = (staticCatalog?.entries ?? [])
+      .filter(isWorkspaceSpecificResource)
+      .filter((entry: ResourceEntry) => entry.activationState === mode.type)
+      .map((entry: ResourceEntry) => resourceRow(entry, definitions, mode.type))
+    return {
+      title: `${mode.type === "missing" ? "Missing" : "Suppressed"} workspace resources`,
+      subtitle: `${rows.length} project-scoped resources in workspace inventory`,
+      emptyText: `No ${mode.type} workspace-specific resources.`,
+      rows,
+    }
+  }
+  if (mode.type === "commands") {
+    const rows = (snapshot?.capabilities?.commands ?? []).map((item: RuntimeCommand) => ({
+      key: `${item.source}:${item.name}`,
+      title: `/${item.name}`,
+      subtitle: item.description ?? definitionLabel(item.resourceId, definitions),
+      meta: item.source,
+    }))
+    return {
+      title: "Runtime commands",
+      subtitle: `${rows.length} loaded in this chat`,
+      emptyText: "No runtime commands loaded in this chat.",
+      rows,
+    }
+  }
+  const rows = (snapshot?.capabilities?.tools ?? []).map((item: RuntimeTool) => ({
+    key: item.name,
+    title: item.name,
+    subtitle: item.description ?? definitionLabel(item.resourceId, definitions),
+    meta: item.active ? "active" : "inactive",
+  }))
+  return {
+    title: "Runtime tools",
+    subtitle: `${rows.length} loaded in this chat`,
+    emptyText: "No runtime tools loaded in this chat.",
+    rows,
+  }
+}
+
+function resourceRow(
+  entry: ResourceEntry,
+  definitions: Record<string, { label?: string | null; canonicalPath?: string }>,
+  state: string,
+) {
+  return {
+    key: `${entry.resourceType}:${entry.resourceId}:${entry.sourceInfo?.source ?? ""}:${entry.sourceInfo?.path ?? ""}`,
+    title: definitionLabel(entry.resourceId, definitions) ?? entry.resourceId,
+    subtitle: entry.sourceInfo?.path ?? entry.sourceInfo?.origin ?? entry.sourceInfo?.scope,
+    meta: [entry.tier, state].filter(Boolean).join(" · ") || entry.resourceType,
+  }
+}
+
+function resourceCount(counts: Map<string, number>, type: ResourceTypeKey): number {
+  let total = 0
+  for (const [key, count] of counts) {
+    if (isResourceType(key, type)) total += count
+  }
+  return total
+}
+
+function isResourceType(actual: string, expected: ResourceTypeKey): boolean {
+  return actual === expected || actual === `${expected}s` || actual.endsWith(`.${expected}`) || actual.endsWith(`.${expected}s`)
+}
+
+function pluralResourceLabel(type: ResourceTypeKey): string {
+  return RESOURCE_TYPES.find(item => item.key === type)?.label ?? type
 }
 
 function Row({
@@ -444,9 +551,11 @@ function Row({
 
 function Badge({
   tone,
+  title,
   children,
 }: {
   tone: "good" | "warn" | "bad" | "muted"
+  title?: string
   children: React.ReactNode
 }) {
   const cls =
@@ -457,7 +566,7 @@ function Badge({
         : tone === "bad"
           ? "border-destructive/30 bg-destructive/10 text-destructive"
           : "border-border bg-muted text-muted-foreground"
-  return <span className={`rounded border px-1.5 py-0.5 ${cls}`}>{children}</span>
+  return <span className={`rounded border px-1.5 py-0.5 ${cls}`} title={title}>{children}</span>
 }
 
 function Placeholder({ children }: { children: React.ReactNode }) {
