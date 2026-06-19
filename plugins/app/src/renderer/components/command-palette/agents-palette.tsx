@@ -20,7 +20,6 @@ import { chatLabel, resolveChatLabel } from "@/lib/chat-label"
 import { useWindowId } from "@/lib/window-state/window-id"
 import { useActiveScopeId } from "@/lib/window-state/active-view"
 import { selectChatInRoot } from "@/lib/window-state/selection"
-import { useSummary } from "../../hooks/use-summary"
 import type { Schema } from "../../../main/schema"
 import { PaletteShell } from "./palette-shell"
 import { useArrowNav } from "./use-arrow-nav"
@@ -32,10 +31,6 @@ type Session = Schema["sessions"][string]
  * Cmd+P focused palette: lists *sessions* (chats deduplicated by
  * `session.sessionId`) in the active scope and, on select, opens the
  * picked chat in the *current* pane via `selectChatInRoot`.
- *
- * Per-row labels are resolved with `useSummary(sessionId)` so the
- * palette shows the same AI summary the sidebar shows — instead of
- * the cheap `branchSummary`/`title` fallback we previously used here.
  *
  * TODO: this fetch-then-subscribe-per-row pattern (also used by the
  * sidebar) really belongs in kyju as a first-class "subscribable
@@ -125,10 +120,8 @@ export function AgentsPalette() {
 
 /**
  * Stand-alone menu UI for the agents palette. We can't reuse the
- * general `<RootMenu>` because each row needs its own React component
- * to call `useSummary(sessionId)`, and `RootMenu`'s `Command[]` API
- * pre-computes a sync string label. The shell, keyboard nav, and
- * filter UX otherwise mirror `RootMenu` 1:1.
+ * general `<RootMenu>` because the shell, keyboard nav, and filter
+ * UX need row-level rendering for status affordances.
  */
 function AgentsMenu({
   rows,
@@ -148,11 +141,6 @@ function AgentsMenu({
   const scrollerRef = useRef<HTMLDivElement>(null)
   const hover = useHoverIntent()
 
-  // Filter uses the synchronous `chatLabel` (branchSummary / title)
-  // as the index text. It's a near-superset of what the live AI
-  // summary surfaces, and waiting on per-row useSummary results to
-  // settle before filtering would feel laggy. Live summaries still
-  // *display* through `<AgentsMenuRow>`.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return rows
@@ -241,11 +229,6 @@ function AgentsMenu({
   )
 }
 
-/**
- * One row in the agents palette. Owns its own `useSummary(sessionId)`
- * subscription so the label updates live as summaries land — exactly
- * like a sidebar entry.
- */
 function AgentsMenuRow({
   chat,
   session,
@@ -263,8 +246,7 @@ function AgentsMenuRow({
 }) {
   const sessionId =
     chat.session.kind === "ready" ? chat.session.sessionId : null
-  const summary = useSummary(sessionId)
-  const { label } = resolveChatLabel(chat, session, summary)
+  const { label } = resolveChatLabel(chat, session)
   const fallbackLabel = chatLabel(chat, { [sessionId ?? ""]: session })
 
   return (

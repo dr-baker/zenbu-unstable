@@ -119,7 +119,26 @@ export type ComposerProps = {
 
 const DEFAULT_PLACEHOLDER = "/ for commands, @ for context"
 const MAX_FILE_RESULTS = 200
-const MAX_SLASH_RESULTS = 50
+const MAX_SLASH_RESULTS = 200
+
+// React <Activity> keeps components mounted while hidden, but tears down
+// effects. CodeMirror lives inside an effect, so tab switches destroy and
+// recreate the EditorView without a React render in between. Keep an
+// in-memory copy keyed by composerKey so a hidden→visible tab restores the
+// latest text immediately instead of relying on the debounced DB draft write.
+const liveDraftsByComposerKey = new Map<string, string>()
+
+function seedForComposerKey(composerKey: string, fallback: string): string {
+  return liveDraftsByComposerKey.get(composerKey) ?? fallback
+}
+
+function rememberComposerDraft(composerKey: string, text: string): void {
+  if (text.length === 0) {
+    liveDraftsByComposerKey.delete(composerKey)
+  } else {
+    liveDraftsByComposerKey.set(composerKey, text)
+  }
+}
 
 type MenuAnchor = { left: number; top: number; bottom: number }
 type FileMenuState = {
@@ -386,6 +405,8 @@ export function Composer({
   // changing deps, which would otherwise run the reseed branch with
   // a stale initialTextRef and wipe the editor's preserved doc.
   const lastComposerKeyRef = useRef<string | null>(null)
+  const composerKeyRef = useRef(composerKey)
+  composerKeyRef.current = composerKey
   // Mirror `locked` into a ref so the Enter handler (defined once when
   // the editor mounts) always sees the latest value without rebuilding
   // the keymap on every render.
@@ -488,7 +509,7 @@ export function Composer({
         const ranked = rankEntries(
           slashRef.current,
           trigger.query,
-          c => `${c.label} ${c.id}`,
+          c => `${c.label} ${c.id} ${c.group ?? ""} ${c.hint ?? ""} ${c.description ?? ""}`,
           MAX_SLASH_RESULTS,
         )
         if (ranked.length === 0) {
@@ -661,6 +682,27 @@ export function Composer({
     return true
   }
 
+  const completeActiveMenuItem = (): boolean => {
+    const current = menuRef.current
+    const view = viewRef.current
+    if (!current || !view) return false
+    const idx = Math.min(selectedIndexRef.current, current.options.length - 1)
+    if (current.kind === "file") {
+      insertFile(current.options[idx]!, current.from, current.to)
+      return true
+    }
+    const cmd = current.options[idx]!
+    const text = cmd.completionText ?? cmd.insertText ?? `/${cmd.label}`
+    view.dispatch({
+      changes: { from: current.from, to: current.to, insert: text },
+      selection: { anchor: current.from + text.length },
+      scrollIntoView: true,
+      userEvent: "input",
+    })
+    view.focus()
+    return true
+  }
+
   const closeMenu = (): boolean => {
     if (!menuRef.current) return false
     setMenu(null)
@@ -714,7 +756,7 @@ export function Composer({
       { key: "ArrowUp", run: () => navigateMenu(-1) },
       { key: "Ctrl-n", run: () => navigateMenu(1) },
       { key: "Ctrl-p", run: () => navigateMenu(-1) },
-      { key: "Tab", run: () => selectActiveMenuItem() },
+      { key: "Tab", run: () => completeActiveMenuItem() },
       { key: "Escape", run: () => closeMenu() },
       {
         // todo: make this a native shortcut
@@ -741,9 +783,10 @@ export function Composer({
         recomputeMenu(update.state, update.view)
         // Notify owner so they can persist the draft. We pass the raw
         // doc string — pill structure re-derives from text on restore.
+        const text = update.state.doc.toString()
+        rememberComposerDraft(composerKeyRef.current, text)
         const cb = onDraftChangeRef.current
         if (cb) {
-          const text = update.state.doc.toString()
           console.log(
             `[composer] docChanged len=${text.length} userEvent=${update.transactions.some(t => t.isUserEvent("input") || t.isUserEvent("delete"))}`,
           )
@@ -759,7 +802,7 @@ export function Composer({
       readOnly: isReadOnly,
     })
 
-    const seed = initialTextRef.current ?? ""
+    const seed = seedForComposerKey(composerKey, initialTextRef.current ?? "")
     // Plugin-contributed extensions live inside a Compartment so we
     // can reconfigure them without remounting the EditorView when the
     // contributed set changes (e.g. function-registry HMR replacing a
@@ -828,7 +871,10 @@ export function Composer({
     if (!isReadOnly) window.addEventListener("focus", onWindowFocus)
 
     return () => {
-      if (!isReadOnly) window.removeEventListener("focus", onWindowFocus)
+      if (!isReadOnly) {
+        window.removeEventListener("focus", onWindowFocus)
+        rememberComposerDraft(composerKeyRef.current, view.state.doc.toString())
+      }
       view.destroy()
       viewRef.current = null
     }
@@ -854,7 +900,7 @@ export function Composer({
     // chat's persisted draft. The EditorView itself is reused across
     // chat switches — only the doc is swapped — so we seed here
     // rather than depending on a fresh mount.
-    const seed = initialTextRef.current ?? ""
+    const seed = seedForComposerKey(composerKey, initialTextRef.current ?? "")
     console.log(
       `[composer] composerKey effect: reseed ${prevKey ?? "<null>"}→${composerKey} seedLen=${seed.length}`,
     )

@@ -1,6 +1,7 @@
 {
 	"plugins": [
 		{ "path": "./plugins/app/zenbu.plugin.ts", "enabled": true },
+		{ "path": "./plugins/pi/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/pi-commands/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/plan/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/agent-sidebar/zenbu.plugin.ts", "enabled": false },
@@ -17,6 +18,7 @@
 		{ "path": "./plugins/cm-markdown/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/cm-vim/zenbu.plugin.ts", "enabled": true },
 		{ "path": "./plugins/cm-image-paste/zenbu.plugin.ts", "enabled": true },
+		{ "path": "./plugins/skill-pills/zenbu.plugin.ts", "enabled": true },
 		{
 			"path": "./plugins/search-recent-agents/zenbu.plugin.ts",
 			"enabled": true

@@ -25,23 +25,15 @@ export function findChatIdForSession(args: {
 }
 
 /**
- * Same precedence as the renderer's `resolveChatLabel`:
- * AI summary → `branchSummary` → `title` → "New Chat". Inlined
- * here (rather than imported from the renderer) so the service
- * stays self-contained — it's a five-line function.
+ * Main-side mirror of the renderer chat label: Pi's session name
+ * is cached in `session.title`; unnamed sessions render as "New Chat".
  */
 export function resolveSessionLabel(args: {
   root: RootSnapshot
   session: Session | undefined
 }): string {
-  const { root, session } = args
+  const { session } = args
   if (!session) return "New Chat"
-  const summary = root.app.sessionMeta[session.id]?.summary?.text
-  if (summary && summary.trim()) return truncateInline({ s: summary.trim(), max: 80 })
-  const branchSummary = session.branchSummary
-  if (branchSummary && branchSummary.trim()) {
-    return truncateInline({ s: branchSummary.trim(), max: 80 })
-  }
   const title = session.title?.trim()
   if (title && title !== "Untitled") return title
   return "New Chat"

@@ -53,7 +53,6 @@ export function WorktreeShelfMenu() {
   const scopesById = useDb(root => root.app.scopes)
   const reposById = useDb(root => root.app.repos)
   const sessionsById = useDb(root => root.app.sessions)
-  const sessionMetaById = useDb(root => root.app.sessionMeta)
   const chatsById = useDb(root => root.app.chats)
 
   type ShelfEntry = {
@@ -115,7 +114,7 @@ export function WorktreeShelfMenu() {
       seen.add(sid)
       out.push({
         id: sid,
-        label: labelForSession(session, sessionMetaById[sid]),
+        label: labelForSession(session),
         timestamp: session.lastActivityAt ?? null,
       })
     }
@@ -130,7 +129,6 @@ export function WorktreeShelfMenu() {
     scopesById,
     chatsById,
     sessionsById,
-    sessionMetaById,
   ])
 
   const unarchiveWorktree = (scopeId: string) => {
@@ -257,15 +255,10 @@ function labelForScope(scope: Scope, repo: Repo | null): string {
   return parts[parts.length - 1] ?? scope.directory
 }
 
-/** Label for an archived chat row: the AI-generated summary if
- * one has landed, else the session's title. */
-function labelForSession(
-  session: Session,
-  meta: Schema["sessionMeta"][string] | undefined,
-): string {
-  const summary = meta?.summary?.text?.trim()
-  if (summary) return summary
-  return session.title || "Untitled chat"
+/** Label for an archived chat row. */
+function labelForSession(session: Session): string {
+  const title = session.title?.trim()
+  return title && title !== "Untitled" ? title : "Untitled chat"
 }
 
 /** Tiny relative-time formatter for the detail rows. Stays

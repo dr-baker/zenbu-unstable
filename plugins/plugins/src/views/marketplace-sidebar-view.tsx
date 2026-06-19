@@ -120,6 +120,7 @@ function ListPane({
   const marketplaceEnabled = useDb((root) => root.plugins.enabled);
 
   const installed = useInstalledPlugins();
+  const loadIssues = useDb((root) => root.app.pluginLoadIssues) ?? [];
   const icons = useDb((root) => root.app.pluginIcons) ?? {};
   const catalog = useDb((root) => root.plugins.catalog) ?? {};
 
@@ -171,6 +172,7 @@ function ListPane({
           className="absolute inset-0 overflow-auto px-1.5"
           style={{ paddingBottom: BODY_BOTTOM_PAD }}
         >
+          {loadIssues.length > 0 && <PluginLoadIssues issues={loadIssues} />}
           {filteredInstalled.length === 0 &&
           filteredMarketplace.length === 0 ? (
             <div className="px-2 py-6 text-center text-[12px] text-muted-foreground">
@@ -211,6 +213,35 @@ function ListPane({
         </SidebarFooter>
       </div>
     </div>
+  );
+}
+
+type PluginLoadIssue = {
+  manifestFile: string;
+  pluginFile: string;
+  reason: string;
+  suggestion: string | null;
+};
+
+function PluginLoadIssues({ issues }: { issues: PluginLoadIssue[] }) {
+  return (
+    <Section label={`Plugin load issues ${issues.length}`}>
+      <div className="flex flex-col gap-1.5 px-1">
+        {issues.map((issue) => (
+          <div
+            key={`${issue.manifestFile}:${issue.pluginFile}`}
+            className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-900 dark:text-amber-200"
+          >
+            <div className="truncate font-medium text-foreground">
+              {dirBasename(issue.pluginFile)} failed to load
+            </div>
+            <div className="mt-0.5 whitespace-pre-wrap text-muted-foreground">
+              {issue.suggestion ?? issue.reason}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Section>
   );
 }
 

@@ -4,7 +4,8 @@
  * Loaded by Pi's normal extension discovery via
  * `DefaultResourceLoader.additionalExtensionPaths`. The path is
  * contributed at app start by the plan plugin's main-process service
- * (`PlanService`) through `PiExtensionRegistryService.register(...)`.
+ * (`PlanService`) through `piRuntime.registerExtension(...)` on the
+ * pi plugin.
  *
  * The LLM calls `plan({ title, markdown })` to author a structured
  * plan. The tool returns a short text confirmation to the model and

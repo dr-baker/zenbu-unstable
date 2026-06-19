@@ -4,7 +4,7 @@ import { Service } from "@zenbujs/core/runtime"
 import {
   RpcService,
 } from "@zenbujs/core/services"
-import { resolveSmallModel } from "../summaries/resolve-model"
+import { resolveSmallModel } from "../lib/resolve-small-model"
 import { complete, type Context } from "@earendil-works/pi-ai"
 
 const execFileP = promisify(execFile)
@@ -98,10 +98,9 @@ type Result<T> = Ok<T> | Err
  *     renderer can render it inline (no uncaught promise toasts).
  *   - Stitch together a "PR draft" view: current branch + commits
  *     ahead of base + uncommitted change summary + suggested title.
- *   - Optional AI-generated commit messages via the same model
- *     resolver `SummariesService` uses, so a user can stage and
- *     commit pending changes from inside the PR view before opening
- *     the PR itself.
+ *   - Optional AI-generated commit messages via the shared small-model
+ *     resolver, so a user can stage and commit pending changes from
+ *     inside the PR view before opening the PR itself.
  */
 export class GithubService extends Service.create({
   key: "github",
@@ -922,9 +921,8 @@ export class GithubService extends Service.create({
    * cheap LLM. Returns `{ subject, body }`; both fields are best
    * effort — callers should let the user edit before committing.
    *
-   * Uses the same model resolver `SummariesService` does, so we
-   * inherit auth discovery (env vars + `~/.pi/agent/auth.json`)
-   * for free.
+   * Uses the shared small-model resolver, so we inherit auth discovery
+   * (env vars + `~/.pi/agent/auth.json`) for free.
    */
   async generateCommitMessage(args: {
     directory: string

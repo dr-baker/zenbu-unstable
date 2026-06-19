@@ -5,31 +5,38 @@ import { RpcService } from "@zenbujs/core/services";
 
 // TODO(cross-plugin-deps): zenbu's `deps:` accepts either a service
 // class reference or a service key string. We use the string form
-// here because the only alternative is importing the class through
-// a deeply nested relative path into the host package, which couples
-// this plugin's source layout to the host's. There is no first-class
-// way to declare a typed dependency on another plugin's service yet;
-// when zenbu grows one (the natural extension of `dependsOn` from
-// renderer-only types to main-process service classes), replace
-// `"piExtensionRegistry"` with the real class import and drop the
-// `any` cast in `evaluate()`.
+// here because there is no first-class way to declare a typed
+// dependency on another plugin's service yet. When zenbu grows one
+// (the natural extension of `dependsOn` from renderer-only types to
+// main-process service classes), replace `"piRuntime"` with a typed
+// Pi plugin service import and drop the local interface below.
 
 // The Pi extension path must still be absolute — it's handed to
 // Pi's SDK at session activation, which expects an OS path.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PLAN_EXTENSION_PATH = path.resolve(here, "../../extension/index.ts");
 
+type PiRuntimeApi = {
+  registerExtension(args: {
+    id: string;
+    path: string;
+    label?: string | null;
+    pluginName?: string | null;
+    source?: "plugin" | "built-in" | "user" | "project";
+  }): Promise<{ ok: true }>;
+  unregisterExtension(args: { id: string }): Promise<{ ok: true }>;
+};
 
 /**
  * Plan plugin service.
  *
  * Responsible for stitching this plugin into the host:
  *
- *  1. Registers `src/extension/index.ts` with the host's
- *     `PiExtensionRegistryService`. The host's `SessionsService`
- *     reads the registry on every `activate()` and forwards the
- *     paths to Pi's `DefaultResourceLoader.additionalExtensionPaths`,
- *     so the `plan` tool becomes available to the LLM.
+ *  1. Registers `src/extension/index.ts` with the Pi plugin's
+ *     `PiRuntimeService`. The host's `SessionsService` asks that
+ *     runtime seam for every `activate()` and forwards the paths to
+ *     Pi's `DefaultResourceLoader.additionalExtensionPaths`, so the
+ *     `plan` tool becomes available to the LLM.
  *
  *  2. Registers the `plan` view — a standalone vite-served React
  *     tree that renders the Markdown payload via Streamdown
@@ -51,32 +58,33 @@ const PLAN_EXTENSION_PATH = path.resolve(here, "../../extension/index.ts");
  *  - Each `setup()` block pairs registration with cleanup, so a
  *    plugin reload cleanly unregisters and re-registers all four.
  *  - The Pi extension registration is reflected in
- *    `root.app.piExtensions` so a future marketplace UI can list
- *    installed extensions via `useDb`.
+ *    `root.pi.extensions` so Pi/plugin-owned UI can list installed
+ *    extensions via `useDb`.
  *  - Already-running sessions ignore the registry change; the user
  *    has to start or switch sessions to pick up changes.
  */
 export class PlanService extends Service.create({
   key: "plan",
   deps: {
-    // String-keyed dep on the host's PiExtensionRegistryService.
-    // See the TODO above for why this isn't a class import.
-    piExtensionRegistry: "piExtensionRegistry",
+    // String-keyed dep on the Pi plugin's runtime seam. See the TODO
+    // above for why this isn't a class import.
+    piRuntime: "piRuntime",
     rpc: RpcService,
   },
 }) {
   evaluate() {
-    // 1. Contribute the Pi extension to the registry.
+    // 1. Contribute the Pi extension through the Pi plugin seam.
     this.setup("register-pi-extension", () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const registry = this.ctx.piExtensionRegistry as any;
-      void registry.register({
+      const piRuntime = this.ctx.piRuntime as PiRuntimeApi;
+      void piRuntime.registerExtension({
         id: "plan",
         path: PLAN_EXTENSION_PATH,
-        meta: { label: "Plan", pluginName: "plan" },
+        label: "Plan",
+        pluginName: "plan",
+        source: "plugin",
       });
       return () => {
-        void registry.unregister({ id: "plan" });
+        void piRuntime.unregisterExtension({ id: "plan" });
       };
     });
 

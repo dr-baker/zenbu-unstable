@@ -8,15 +8,10 @@ import type { ImageRef, QueueKind, QueuedDraft } from "./types"
 
 type Svc = SessionsService
 
-/**
- * Stamp `sessionMeta[sessionId].lastMessageSentTime = now`.
- *
- * Maintains a per-session timestamp the sidebar uses to sort by
- * "Recent activity" without ever reading the lazy `eventLog`
- * collection. Independent of the AI summary lifecycle — always
- * stamped, even if the summarizer is going to fail or skip.
- * Creates the row if it doesn't exist yet, with a null summary.
- */
+/** Stamp `session.lastMessageSentTime = now` when a real user
+ * message is sent. This distinguishes an unused ready chat from one
+ * that has carried conversation content without needing a separate
+ * metadata cache. */
 export async function stampLastMessageSent(args: {
   svc: Svc
   sessionId: string
@@ -24,16 +19,8 @@ export async function stampLastMessageSent(args: {
   const { svc, sessionId } = args
   const now = Date.now()
   await svc.ctx.db.client.update(root => {
-    const existing = root.app.sessionMeta[sessionId]
-    if (existing) {
-      existing.lastMessageSentTime = now
-    } else {
-      root.app.sessionMeta[sessionId] = {
-        sessionId,
-        summary: null,
-        lastMessageSentTime: now,
-      }
-    }
+    const session = root.app.sessions[sessionId]
+    if (session) session.lastMessageSentTime = now
   })
 }
 

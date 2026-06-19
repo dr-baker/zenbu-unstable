@@ -22,8 +22,9 @@ import { z } from "@zenbujs/core/db";
  *    an ordinary installed zenbu plugin (no chip).
  *  - `enabled`: whether the plugin is loaded. Disabled plugins stay
  *    in the list (with their icon) so the UI can show them as off.
- *  - `description` / `author` / `version`: from the plugin's
- *    `package.json` at index time; `null` if absent.
+ *  - `description` / `author` / `version` / `dependencies`: from the
+ *    plugin's `package.json` / `zenbu.plugin.ts` at index time.
+ *  - `updatedAt`: best-effort local source mtime, ISO encoded.
  *  - `pluginFile`: manifest entry path used to enable/disable/remove;
  *    `null` for core plugins and pi extensions.
  */
@@ -36,6 +37,8 @@ export const pluginListing = z.object({
   description: z.string().nullable().default(null),
   author: z.string().nullable().default(null),
   version: z.string().nullable().default(null),
+  dependencies: z.array(z.string()).default([]),
+  updatedAt: z.string().nullable().default(null),
   pluginFile: z.string().nullable().default(null),
 });
 
@@ -51,6 +54,13 @@ export const pluginIcon = z.object({
   mime: z.string(),
   sourcePath: z.string(),
   hash: z.string(),
+});
+
+export const pluginLoadIssue = z.object({
+  manifestFile: z.string(),
+  pluginFile: z.string(),
+  reason: z.string(),
+  suggestion: z.string().nullable().default(null),
 });
 
 // ---------------------------------------------------------------------------
@@ -101,23 +111,6 @@ export const recentProject = z.object({
 // re-register from their own `setup()` blocks, so removed plugins
 // never leave dangling entries.
 // ---------------------------------------------------------------------------
-
-/**
- * A Pi extension contributed by a zenbu plugin. `path` is an
- * absolute filesystem path to the extension's entry `.ts` file;
- * `SessionsService` feeds these into
- * `DefaultResourceLoader.additionalExtensionPaths`.
- */
-export const piExtension = z.object({
-  id: z.string(),
-  path: z.string(),
-  meta: z
-    .object({
-      label: z.string().optional(),
-      pluginName: z.string().optional(),
-    })
-    .default({}),
-});
 
 /**
  * A command palette action contributed by a plugin.
