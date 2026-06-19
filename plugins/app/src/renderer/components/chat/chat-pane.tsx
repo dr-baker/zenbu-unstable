@@ -268,8 +268,11 @@ export function ChatPane({
         id: `registered:${cmd.id}`,
         label: cmd.label,
         description: cmd.description ?? undefined,
+        group: cmd.group ?? undefined,
+        hint: cmd.hint ?? cmd.source ?? undefined,
         action: cmd.insertOnSelect ? undefined : `registered:${cmd.id}`,
         insertText: cmd.insertOnSelect ? `/${cmd.name} ` : undefined,
+        completionText: `/${cmd.name}`,
       }))
     const hasRegistered = (name: string) =>
       Object.values(registeredSlashCommands).some(cmd => cmd.name === name)
@@ -279,12 +282,14 @@ export function ChatPane({
         id: "queue",
         label: "queue",
         description: "send now, queue after the current turn finishes",
+        completionText: "/queue",
         submitWith: "followUp",
       },
       {
         id: "steer",
         label: "steer",
         description: "send now, interject before the agent's next LLM call",
+        completionText: "/steer",
         submitWith: "steer",
       },
     ]
@@ -295,12 +300,14 @@ export function ChatPane({
             label: "set default to steer",
             description: "plain Enter while streaming will steer",
             action: "set-default-steer",
+            completionText: "/set-default-steer",
           }
         : {
             id: "set-default-queue",
             label: "set default to queue",
             description: "plain Enter while streaming will queue",
             action: "set-default-queue",
+            completionText: "/set-default-queue",
           }
     const lockCmd: SlashCommand = locked
       ? {
@@ -308,24 +315,28 @@ export function ChatPane({
           label: "unlock",
           description: "allow Enter to send again",
           action: "unlock",
+          completionText: "/unlock",
         }
       : {
           id: "lock",
           label: "lock",
           description: "lock the input so Enter inserts a newline",
           action: "lock",
+          completionText: "/lock",
         }
     const cloneCmd: SlashCommand = {
       id: "clone",
       label: "clone",
       description: "duplicate the session at the current position",
       action: "clone",
+      completionText: "/clone",
     }
     const workspaceCmd: SlashCommand = {
       id: "workspace",
       label: "move-to-worktree",
       description: "move this chat into a new git worktree",
       action: "openWorkspace",
+      completionText: "/move-to-worktree",
     }
     const handoffCmd: SlashCommand = {
       id: "worktree-handoff",
@@ -333,6 +344,7 @@ export function ChatPane({
       description:
         "rebase onto / land on another worktree (run twice: rebase, test, land)",
       action: "openHandoff",
+      completionText: "/worktree-handoff",
     }
     return [
       ...sendCmds,

@@ -4,13 +4,12 @@ import { fileURLToPath } from "node:url"
 import { spawn, spawnSync } from "node:child_process"
 import dotenv from "dotenv"
 
-import { Service } from "@zenbujs/core/runtime"
+import { Service, runtime } from "@zenbujs/core/runtime"
 import { DbService, RpcService } from "@zenbujs/core/services"
 import type { ImageContent } from "@earendil-works/pi-ai"
+import type { EventBus, SlashCommandInfo } from "@earendil-works/pi-coding-agent"
 
 import { AuthService } from "./auth"
-import { SummariesService } from "./summaries"
-import { PiExtensionRegistryService } from "./pi-extension-registry"
 import { ReposService } from "./repos"
 import { SessionActivityService } from "./session-activity"
 import { ShellEnvService } from "./shell-env"
@@ -52,6 +51,7 @@ import {
   enqueue,
   prompt,
   sendQueuedNow,
+  stampLastMessageSent,
 } from "./sessions/queue"
 
 dotenv.config({
@@ -62,13 +62,26 @@ dotenv.config({
   quiet: true,
 })
 
+export type PiRuntimeApi = {
+  getSessionConfig(args: {
+    sessionId: string
+    scopeId: string
+    cwd: string
+  }): Promise<{
+    extensionPaths: string[]
+    eventBus?: EventBus
+  }>
+  syncRuntimeCommands?(args: {
+    sessionId: string
+    commands: SlashCommandInfo[]
+  }): Promise<{ ok: true }>
+}
+
 export class SessionsService extends Service.create({
   key: "sessions",
   deps: {
     db: DbService,
-    summaries: SummariesService,
     rpc: RpcService,
-    piExtensionRegistry: PiExtensionRegistryService,
     repos: ReposService,
     sessionActivity: SessionActivityService,
     auth: AuthService,
@@ -86,6 +99,7 @@ export class SessionsService extends Service.create({
   /** Per-session queue mutex tickets — see `withQueueLock` in
    * `./sessions/queue.ts`. */
   readonly queueLocks = new Map<string, Promise<void>>()
+  private currentPiRuntime: PiRuntimeApi | undefined
 
   /**
    * Pi's credential store. Owned by `AuthService` — we just read
@@ -102,7 +116,23 @@ export class SessionsService extends Service.create({
     return this.ctx.auth.registry
   }
 
+  /**
+   * Soft string-key seam to the Pi plugin. The app plugin deliberately
+   * does not declare a hard service dependency so chat hosting can fall
+   * back to plain Pi defaults during dev/hot reload if the Pi plugin is
+   * temporarily unavailable.
+   */
+  get piRuntime(): PiRuntimeApi | undefined {
+    return this.currentPiRuntime
+  }
+
   async evaluate() {
+    this.setup("optional-pi-runtime", () =>
+      runtime.get<PiRuntimeApi & Service>({ key: "piRuntime" }, piRuntime => {
+        this.currentPiRuntime = piRuntime
+      }),
+    )
+
     await this.ctx.db.client.update(root => {
       for (const s of Object.values(root.app.sessions)) {
         s.isStreaming = false
@@ -232,6 +262,25 @@ export class SessionsService extends Service.create({
     streamingBehavior?: "steer" | "followUp"
   }): Promise<void> {
     return prompt({ svc: this, ...args })
+  }
+
+  /**
+   * Narrow host seam for Pi-owned slash command UI. Unlike `prompt()`,
+   * this does not pre-stage a visible user message. Pi decides what the
+   * slash command means: extension commands may execute immediately with
+   * no chat bubble, while prompt/skill commands that become real user
+   * messages are still synthesized from Pi's own `message_end` event.
+   */
+  async runRuntimeCommand(args: {
+    sessionId: string
+    text: string
+  }): Promise<void> {
+    const live = await this.ensureLive(args.sessionId)
+    await live.pi.prompt(args.text, {
+      streamingBehavior: live.pi.isStreaming ? "followUp" : undefined,
+    })
+    await stampLastMessageSent({ svc: this, sessionId: args.sessionId })
+    await syncRuntime({ svc: this, live })
   }
 
   async steer(args: { sessionId: string; text: string }) {
@@ -371,6 +420,7 @@ export class SessionsService extends Service.create({
   async reload(args: { sessionId: string }): Promise<{ ok: true }> {
     const live = await this.ensureLive(args.sessionId)
     await live.pi.reload()
+    await this.syncPiRuntimeCommands(live)
     await syncRuntime({ svc: this, live })
     return { ok: true }
   }
@@ -658,9 +708,39 @@ export class SessionsService extends Service.create({
     return p
   }
 
+  /**
+   * Publish Pi's current slash-command catalog into the Pi plugin DB.
+   *
+   * The runtime-command-sync extension also emits on Pi lifecycle
+   * events, but app activation/reload is the host's reliable point
+   * after resource loading has settled. Keeping this as a narrow seam
+   * avoids moving live `AgentSession` ownership into the Pi plugin.
+   */
+  async syncPiRuntimeCommands(live: LiveSession): Promise<void> {
+    const commands = readPiRuntimeCommands(live)
+    if (!commands) return
+    await this.piRuntime?.syncRuntimeCommands?.({
+      sessionId: live.sessionId,
+      commands,
+    })
+  }
+
   /** Re-exported so helper modules can call it without importing
    * the activation module separately. */
   resolveSessionLabelSnapshot(sessionId: string): string {
     return resolveSessionLabelSnapshot({ svc: this, sessionId })
   }
+}
+
+function readPiRuntimeCommands(live: LiveSession): SlashCommandInfo[] | null {
+  const pi = live.pi as unknown as {
+    getCommands?: () => SlashCommandInfo[]
+    _extensionRunner?: {
+      runtime?: { getCommands?: () => SlashCommandInfo[] }
+    }
+  }
+  if (typeof pi.getCommands === "function") return pi.getCommands()
+  const getCommands = pi._extensionRunner?.runtime?.getCommands
+  if (typeof getCommands !== "function") return null
+  return getCommands()
 }

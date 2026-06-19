@@ -8,7 +8,6 @@ import {
 } from "@zenbu/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { HoverTip } from "@zenbu/ui/hover-tip"
-import { useSummary } from "../../hooks/use-summary"
 import { Spinner } from "../common/spinner"
 
 export type ChatTabsAdjacency = {
@@ -18,12 +17,9 @@ export type ChatTabsAdjacency = {
 
 export type ChatTabEntry = {
   id: string
-  /** Fallback label used until the AI summary loads (or when none
-   * exists). Already truncated by the caller. */
+  /** Display label, already truncated by the caller. */
   title: string
   hasChat: boolean
-  /** When set, the tab subscribes to the session's AI summary and
-   * prefers it over `title` once it loads. */
   sessionId?: string | null
   /** When true, the tab renders a small spinner to indicate the
    * underlying session is currently streaming / running. Mirrors the
@@ -39,8 +35,7 @@ export type ChatTabEntry = {
   hasUnread?: boolean
   /** When true the tab is hosting a registered view (file-tree, pr,
    * etc.) rather than a chat. The tabstrip uses this to skip
-   * chat-specific affordances and to avoid subscribing to session
-   * summaries. */
+   * chat-specific affordances. */
   isView?: boolean
 }
 
@@ -265,10 +260,6 @@ type ChatTabItemProps = {
   onClosePane?: () => void
 }
 
-/** Single tab. Lives as its own component so it can hold a
- * `useSummary(sessionId)` subscription per tab \u2014 the rules of hooks
- * forbid calling hooks inside a `.map` whose length isn't fixed, so
- * each tab needs its own component instance. */
 function ChatTabItem({
   entry,
   isActive,
@@ -285,12 +276,7 @@ function ChatTabItem({
   onOpenInNewTab,
   onClosePane,
 }: ChatTabItemProps): ReactNode {
-  const summary = useSummary(entry.sessionId ?? null)
-  // Prefer the live AI summary when present in the db. Otherwise fall
-  // back to the synchronous label the caller already computed
-  // (branchSummary / session.title / "New Chat").
-  const liveTitle =
-    summary && summary.trim() ? truncate(summary.trim(), 80) : entry.title
+  const liveTitle = entry.title
 
   return (
     <ContextMenu>

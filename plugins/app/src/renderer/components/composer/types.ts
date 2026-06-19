@@ -6,10 +6,16 @@ export type SlashCommand = {
   id: string
   label: string
   description?: string
+  /** Optional group header in the typeahead menu. */
+  group?: string
+  /** Short provenance/status text rendered on the right side. */
+  hint?: string
   /** When set, picking this command fires `onAction(action)` and clears the input. */
   action?: string
   /** When set, picking this command replaces the trigger with this text. */
   insertText?: string
+  /** Slash text to use when Tab completes this menu item without activating it. */
+  completionText?: string
   /** When set, picking this command strips the slash trigger from
    * the doc and immediately submits whatever's left with the given
    * intent. Used for the `/queue` and `/steer` commands — the user

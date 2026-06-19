@@ -1,5 +1,5 @@
 /**
- * Auto-discover an available model for ad-hoc completion calls (summarization, etc).
+ * Auto-discover an available small model for ad-hoc completion calls.
  *
  * Mirrors what `pi-coding-agent` does internally:
  *   - AuthStorage discovers credentials from env vars and ~/.pi/agent/auth.json

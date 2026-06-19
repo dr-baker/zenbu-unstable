@@ -12,6 +12,7 @@
     "link": "zen link",
     "db:generate": "zen db generate",
     "typecheck": "tsc --noEmit",
+    "typecheck:all": "ok=0; for p in plugins/*/tsconfig.json; do echo \"== $p\"; ./node_modules/.bin/tsc --noEmit -p \"$p\" || ok=1; done; exit $ok",
     "lint": "eslint .",
     "ci": "pnpm run typecheck && pnpm run lint",
     "test": "vitest run",
@@ -39,10 +40,16 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@google/genai",
       "@parcel/watcher",
+      "@swc/core",
+      "core-js",
       "electron",
       "electron-winstaller",
-      "esbuild"
+      "esbuild",
+      "msgpackr-extract",
+      "protobufjs"
     ]
-  }
+  },
+  "packageManager": "pnpm@10.13.1"
 }

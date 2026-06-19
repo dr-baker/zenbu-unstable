@@ -17,8 +17,8 @@ import { ErrorBanner } from "./error-banner"
  * should use the dedicated Git view.
  *
  * "Generate with AI" calls into `github.generateCommitMessage` which
- * uses the same small-model resolver `SummariesService` uses, so we
- * inherit auth discovery from there.
+ * uses the shared small-model resolver, so we inherit auth discovery
+ * from there.
  */
 export function CommitMessageSection({
   directory,

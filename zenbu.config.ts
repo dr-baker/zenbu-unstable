@@ -4,6 +4,19 @@ import {
   type BuildPlugin,
 } from "@zenbujs/core/config";
 
+const RELEASE_PNPM_VERSION = "10.13.1";
+
+const releasePnpmConfig = [
+  // First launch runs package-manager install inside the cloned source tree.
+  // Keep that install deterministic and memory-bounded: use the shipped
+  // lockfile, skip dev-only toolchains, and serialize native postinstalls.
+  "production=true",
+  "frozen-lockfile=true",
+  "prefer-offline=true",
+  "child-concurrency=1",
+  "network-concurrency=8",
+].join("\n") + "\n";
+
 const trimPackageJson: BuildPlugin = {
   name: "trim-package-json",
   transform(file) {
@@ -25,7 +38,19 @@ const trimPackageJson: BuildPlugin = {
       delete pkg.scripts["release:electron"];
     }
 
+    // The bundled launcher ships this pnpm version. If package.json asks for
+    // another one, pnpm's package-manager-version manager can bootstrap a
+    // second pnpm during first launch and ignore the release install policy.
+    pkg.packageManager = `pnpm@${RELEASE_PNPM_VERSION}`;
+
     return JSON.stringify(pkg, null, 2) + "\n";
+  },
+};
+
+const releaseInstallConfig: BuildPlugin = {
+  name: "release-install-config",
+  done(ctx) {
+    ctx.emit(".npmrc", releasePnpmConfig);
   },
 };
 
@@ -34,7 +59,7 @@ export default defineConfig({
   pluginsFiles: ["./zenbu.plugins.jsonc", "./zenbu.plugins.local.jsonc"],
 
   build: defineBuildConfig({
-    packageManager: { type: "pnpm", version: "10.13.1" },
+    packageManager: { type: "pnpm", version: RELEASE_PNPM_VERSION },
     out: ".zenbu/build/source",
     include: [
       "plugins/*/assets/**",
@@ -44,11 +69,17 @@ export default defineConfig({
       "plugins/app/package.json",
       "plugins/app/tsconfig.json",
       "plugins/app/vite.config.ts",
+      "plugins/pi/src/**",
+      "plugins/pi/migrations/**",
+      "plugins/pi/zenbu.plugin.ts",
+      "plugins/pi/package.json",
+      "plugins/pi/tsconfig.json",
       "plugins/plan/src/**",
       "plugins/plan/zenbu.plugin.ts",
       "plugins/plan/package.json",
       "plugins/plan/tsconfig.json",
       "plugins/pi-commands/src/**",
+      "plugins/pi-commands/migrations/**",
       "plugins/pi-commands/zenbu.plugin.ts",
       "plugins/pi-commands/package.json",
       "plugins/pi-commands/tsconfig.json",
@@ -113,6 +144,10 @@ export default defineConfig({
       "plugins/cm-image-paste/zenbu.plugin.ts",
       "plugins/cm-image-paste/package.json",
       "plugins/cm-image-paste/tsconfig.json",
+      "plugins/skill-pills/src/**",
+      "plugins/skill-pills/zenbu.plugin.ts",
+      "plugins/skill-pills/package.json",
+      "plugins/skill-pills/tsconfig.json",
       "plugins/search-recent-agents/src/**",
       "plugins/search-recent-agents/zenbu.plugin.ts",
       "plugins/search-recent-agents/package.json",
@@ -167,7 +202,7 @@ export default defineConfig({
       "**/traces/**",
       "**/.DS_Store",
     ],
-    plugins: [trimPackageJson],
+    plugins: [trimPackageJson, releaseInstallConfig],
     mirror: { target: "zenbu-labs/zenbu-release", branch: "main" },
   }),
 });

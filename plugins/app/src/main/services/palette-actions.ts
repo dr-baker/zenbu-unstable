@@ -28,7 +28,7 @@ export type RegisteredPaletteAction = {
  * Generic registry of command-palette actions contributed by zenbu
  * plugins (including the host itself).
  *
- * Mirrors the shape of `PiExtensionRegistryService`: any plugin can
+ * Mirrors the shape of `SlashCommandsService`: any plugin can
  * register an action from within its own service `setup()` block,
  * supplying an RPC location that the renderer should dispatch when
  * the user picks the action. The handler runs in the main process

@@ -53,3 +53,6 @@ traces/
 experiments/
 tmp
 .vercel
+
+# Local Claude Code config/skills
+.claude/

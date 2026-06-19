@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "#registry/*": [
+        "./types/*"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "types",
+    "./.zenbu/types/zenbu-register.ts"
+  ]
+}

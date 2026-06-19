@@ -77,6 +77,8 @@ type PluginListing = {
   description: string | null
   author: string | null
   version: string | null
+  dependencies: string[]
+  updatedAt: string | null
   // Absolute path to the plugin's manifest entry file. Needed by
   // the UI to enable/disable/remove the plugin. `null` for core
   // plugins (declared in zenbu.config.ts, not user-toggleable) and
@@ -87,6 +89,8 @@ type PackageMeta = {
   description: string | null
   author: string | null
   version: string | null
+  dependencies: string[]
+  updatedAt: string | null
 }
 type IconRecord = {
   blobId: string
@@ -163,27 +167,84 @@ function buildListings(
     )
 }
 
-// Read package.json metadata (canonical local source) so the UI
-// doesn't read files per-row. Nulls for missing/unparseable fields.
+// Read plugin metadata once in the mirror so rows/details don't need
+// per-render filesystem RPCs for the common fields. Nulls for
+// missing/unparseable package fields; dependency names come from the
+// Zenbu `dependsOn` block when present.
 function readPackageMeta(pluginDir: string): PackageMeta {
-  const empty: PackageMeta = { description: null, author: null, version: null }
+  const empty: PackageMeta = {
+    description: null,
+    author: null,
+    version: null,
+    dependencies: [],
+    updatedAt: readBestEffortUpdatedAt(pluginDir),
+  }
   let raw: string
   try {
     raw = fs.readFileSync(path.join(pluginDir, "package.json"), "utf8")
   } catch {
-    return empty
+    return {
+      ...empty,
+      dependencies: readZenbuDependencies(pluginDir),
+    }
   }
   let parsed: Record<string, unknown>
   try {
     parsed = JSON.parse(raw) as Record<string, unknown>
   } catch {
-    return empty
+    return {
+      ...empty,
+      dependencies: readZenbuDependencies(pluginDir),
+    }
   }
   return {
     description:
       typeof parsed.description === "string" ? parsed.description : null,
     author: extractAuthor(parsed.author),
     version: typeof parsed.version === "string" ? parsed.version : null,
+    dependencies: readZenbuDependencies(pluginDir),
+    updatedAt: empty.updatedAt,
+  }
+}
+
+function readZenbuDependencies(pluginDir: string): string[] {
+  let raw: string
+  try {
+    raw = fs.readFileSync(path.join(pluginDir, "zenbu.plugin.ts"), "utf8")
+  } catch {
+    return []
+  }
+  const dependsOn = raw.match(/dependsOn\s*:\s*\[([\s\S]*?)\]/)?.[1]
+  if (!dependsOn) return []
+  const names = new Set<string>()
+  for (const match of dependsOn.matchAll(/name\s*:\s*["']([^"']+)["']/g)) {
+    names.add(match[1]!)
+  }
+  return [...names].sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" }),
+  )
+}
+
+function readBestEffortUpdatedAt(pluginDir: string): string | null {
+  const candidates = [
+    pluginDir,
+    path.join(pluginDir, "zenbu.plugin.ts"),
+    path.join(pluginDir, "package.json"),
+  ]
+  let newest = 0
+  for (const candidate of candidates) {
+    try {
+      newest = Math.max(newest, fs.statSync(candidate).mtimeMs)
+    } catch {}
+  }
+  return newest > 0 ? new Date(newest).toISOString() : null
+}
+
+function readFileUpdatedAt(filePath: string): string | null {
+  try {
+    return fs.statSync(filePath).mtime.toISOString()
+  } catch {
+    return null
   }
 }
 
@@ -231,11 +292,91 @@ function readPiExtensions(): PluginListing[] {
         description: null,
         author: null,
         version: null,
+        dependencies: [],
+        updatedAt: readFileUpdatedAt(abs),
         pluginFile: null,
       })
     }
   }
   return out
+}
+
+type PluginLoadIssue = {
+  manifestFile: string
+  pluginFile: string
+  reason: string
+  suggestion: string | null
+}
+
+function readPluginLoadIssues(snapshot: ConfigSnapshot): PluginLoadIssue[] {
+  const raw = (snapshot as ConfigSnapshot & {
+    pluginLoadIssues?: unknown
+  }).pluginLoadIssues
+  if (!Array.isArray(raw)) return []
+  const out: PluginLoadIssue[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue
+    const record = item as Record<string, unknown>
+    if (
+      typeof record.manifestFile !== "string" ||
+      typeof record.pluginFile !== "string" ||
+      typeof record.reason !== "string"
+    ) {
+      continue
+    }
+    out.push({
+      manifestFile: record.manifestFile,
+      pluginFile: record.pluginFile,
+      reason: record.reason,
+      suggestion:
+        typeof record.suggestion === "string" ? record.suggestion : null,
+    })
+  }
+  return out
+}
+
+function inferSkippedManifestIssues(
+  snapshot: ConfigSnapshot,
+  manifestRows: PluginManifestRow[],
+): PluginLoadIssue[] {
+  const loadedFiles = new Set(
+    snapshot.plugins.map(p => path.join(path.resolve(p.dir), "zenbu.plugin.ts")),
+  )
+  const issues: PluginLoadIssue[] = []
+  for (const row of manifestRows) {
+    if (!row.enabled) continue
+    const pluginFile = path.resolve(row.path)
+    if (loadedFiles.has(pluginFile)) continue
+    const pluginDir = path.dirname(pluginFile)
+    const corePkg = path.join(pluginDir, "node_modules", "@zenbujs", "core")
+    const missingCore = !fs.existsSync(corePkg)
+    issues.push({
+      manifestFile: row.manifestPath,
+      pluginFile,
+      reason: missingCore
+        ? `Cannot resolve @zenbujs/core from ${pluginDir}`
+        : "Plugin was declared enabled but did not load.",
+      suggestion: missingCore
+        ? [
+            "Could not resolve @zenbujs/core from the plugin directory.",
+            "This usually means the plugin dependencies were not installed after moving or cloning it.",
+            `Try: cd ${pluginDir} && pnpm install`,
+            "If this plugin was manually moved out of the app repo, make sure it has a package.json with @zenbujs/core and any renderer dependencies.",
+          ].join("\n")
+        : "Check the app console for the loader error, then fix the plugin or disable it in zenbu.plugins.local.jsonc.",
+    })
+  }
+  return issues
+}
+
+function mergePluginLoadIssues(...groups: PluginLoadIssue[][]): PluginLoadIssue[] {
+  const byFile = new Map<string, PluginLoadIssue>()
+  for (const group of groups) {
+    for (const issue of group) byFile.set(issue.pluginFile, issue)
+  }
+  return [...byFile.values()].sort((a, b) =>
+    a.pluginFile.localeCompare(b.pluginFile, undefined, { sensitivity: "base" }),
+  )
 }
 
 function listingsEqual(a: PluginListing[], b: PluginListing[]): boolean {
@@ -252,12 +393,19 @@ function listingsEqual(a: PluginListing[], b: PluginListing[]): boolean {
       x.description !== y.description ||
       x.author !== y.author ||
       x.version !== y.version ||
+      !stringArraysEqual(x.dependencies, y.dependencies) ||
+      x.updatedAt !== y.updatedAt ||
       x.pluginFile !== y.pluginFile
     ) {
       return false
     }
   }
   return true
+}
+
+function stringArraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((value, index) => value === b[index])
 }
 
 function discoverIcon(pluginDir: string): DiscoveredIcon | null {
@@ -374,6 +522,10 @@ export class PluginRegistryMirrorService extends Service.create({
         err,
       )
     }
+    const pluginLoadIssues = mergePluginLoadIssues(
+      readPluginLoadIssues(snapshot),
+      inferSkippedManifestIssues(snapshot, manifestRows),
+    )
     const next = buildListings(snapshot, manifestRows)
 
     // Discover icons on disk before opening a DB update — we don't
@@ -470,6 +622,7 @@ export class PluginRegistryMirrorService extends Service.create({
       if (!listingsEqual(prev, next)) {
         root.app.plugins = next
       }
+      root.app.pluginLoadIssues = pluginLoadIssues
       const icons = root.app.pluginIcons as Record<string, IconRecord>
       for (const name of Object.keys(icons)) {
         if (!nextNames.has(name)) {
