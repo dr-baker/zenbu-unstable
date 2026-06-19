@@ -17,7 +17,7 @@ import { definePlugin } from "@zenbujs/core/config";
  *   - the session footer (cumulative tokens, cost, leaves, …)
  *
  * Because component views share the host's React tree, the
- * view reads `root.app.sessions[...]` / `root.app.scopes[...]`
+ * view reads `root.pi.sessions[...]` / `root.app.scopes[...]`
  * straight off the host's replica and mutates extraDirectories
  * through `useDbClient` — no iframe/postMessage bridge.
  *
@@ -35,7 +35,8 @@ import { definePlugin } from "@zenbujs/core/config";
 export default definePlugin({
   name: "contextSidebar",
   services: ["./src/main/services/*.ts"],
-  dependsOn: [{ name: "app", from: "../../zenbu.config.ts" }],
+  dependsOn: [
+    { name: "pi", from: "../pi/zenbu.plugin.ts" },{ name: "app", from: "../../zenbu.config.ts" }],
   icons: {
     // lucide: layout-grid
     "context-sidebar":

@@ -57,7 +57,7 @@ export function useSidebarActions() {
       .sort((a, b) => b.createdAt - a.createdAt)[0]
     const latestSession =
       latest?.session.kind === "ready"
-        ? root.app.sessions[latest.session.sessionId]
+        ? root.pi.sessions[latest.session.sessionId]
         : undefined
     const latestHasMessage = latestSession?.lastMessageSentTime != null
     if (latest && !latestHasMessage) {
@@ -78,7 +78,7 @@ export function useSidebarActions() {
         selectChatInRoot(root, windowId, chatId)
       })
       .then(() => {
-        void rpc.app.sessions
+        void rpc.pi.sessions
           .createChatSession({ scopeId, chatId })
           .catch(err =>
             console.error("[sidebar] createChatSession failed:", err),
@@ -142,7 +142,7 @@ export function useSidebarActions() {
     void dbClient
       .update(r => {
         if (chat.session.kind === "ready") {
-          const session = r.app.sessions[chat.session.sessionId]
+          const session = r.pi.sessions[chat.session.sessionId]
           if (session) session.archived = true
         } else {
           delete r.app.chats[chat.id]

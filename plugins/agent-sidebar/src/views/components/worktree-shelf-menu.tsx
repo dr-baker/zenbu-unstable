@@ -14,10 +14,11 @@ import { Button } from "@zenbu/ui/button"
 import { HoverTip } from "@zenbu/ui/hover-tip"
 import { useActiveWorkspaceId } from "@/lib/window-state/active-view"
 import type { Schema } from "@host/main/schema"
+import type { SelfDbSection as PiSchema } from "../../../.zenbu/types/deps/pi/db-sections"
 
 type Scope = Schema["scopes"][string]
 type Repo = Schema["repos"][string]
-type Session = Schema["sessions"][string]
+type Session = PiSchema["sessions"][string]
 type Chat = Schema["chats"][string]
 
 /**
@@ -52,7 +53,7 @@ export function WorktreeShelfMenu() {
   // (See zenbu-labs/zenbu.js#11.)
   const scopesById = useDb(root => root.app.scopes)
   const reposById = useDb(root => root.app.repos)
-  const sessionsById = useDb(root => root.app.sessions)
+  const sessionsById = useDb(root => root.pi.sessions)
   const chatsById = useDb(root => root.app.chats)
 
   type ShelfEntry = {
@@ -142,7 +143,7 @@ export function WorktreeShelfMenu() {
 
   const unarchiveChat = (sessionId: string) => {
     void dbClient.update(root => {
-      const session = root.app.sessions[sessionId]
+      const session = root.pi.sessions[sessionId]
       if (!session) return
       session.archived = false
     })

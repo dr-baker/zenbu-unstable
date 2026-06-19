@@ -14,6 +14,7 @@ export default definePlugin({
   schema: "./src/main/schema.ts",
   migrations: "./migrations",
   dependsOn: [
+    { name: "pi", from: "../pi/zenbu.plugin.ts" },
     { name: "app", from: "../../zenbu.config.ts" },
     { name: "settings", from: "../../zenbu.config.ts" },
   ],

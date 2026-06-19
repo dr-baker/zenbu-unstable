@@ -4,6 +4,7 @@ import type { WorkspaceRailEntry } from "../components/layout/workspace-rail"
 import { useActiveScopeId, useActiveView, useActiveWorkspaceId } from "@/lib/window-state/active-view"
 import { scopeForChat } from "@/lib/sidebar-helpers"
 import type { Schema } from "../../main/schema"
+import type { SelfDbSection as PiSchema } from "../../../.zenbu/types/deps/pi/db-sections"
 
 type Chat = Schema["chats"][string]
 type Scope = Schema["scopes"][string]
@@ -89,7 +90,7 @@ export function useSidebarGroups(): SidebarGroup[] {
   const workspaceId = useActiveWorkspaceId()
   const chatsById = useDb(root => root.app.chats)
   const scopesById = useDb(root => root.app.scopes)
-  const sessionsById = useDb(root => root.app.sessions)
+  const sessionsById = useDb(root => root.pi.sessions)
 
   return useMemo<SidebarGroup[]>(() => {
     if (!workspaceId) return []
@@ -156,7 +157,7 @@ export function useSidebarGroups(): SidebarGroup[] {
 /** Used by `archiveChat` to decide whether to refuse archiving the
  * last row in scope. Read on-demand at the moment of click. */
 export function getSessionRowsInScope(
-  root: { app: Schema },
+  root: { app: Schema; pi: PiSchema },
   workspaceId: string | null,
   scopeId: string | null,
 ): Chat[] {
@@ -170,7 +171,7 @@ export function getSessionRowsInScope(
     if (chat.session.kind === "ready") {
       const sid = chat.session.sessionId
       if (seen.has(sid)) continue
-      if (root.app.sessions[sid]?.archived) continue
+      if (root.pi.sessions[sid]?.archived) continue
       seen.add(sid)
     }
     out.push(chat)
@@ -183,7 +184,7 @@ export function useWorkspaceRailEntries(): WorkspaceRailEntry[] {
   const scopesById = useDb(root => root.app.scopes)
   const reposById = useDb(root => root.app.repos)
   const chatsById = useDb(root => root.app.chats)
-  const sessionsById = useDb(root => root.app.sessions)
+  const sessionsById = useDb(root => root.pi.sessions)
 
   return useMemo(() => {
     const workspaces = Object.values(workspacesById)

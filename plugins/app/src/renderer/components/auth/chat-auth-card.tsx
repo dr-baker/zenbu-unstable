@@ -35,10 +35,10 @@ const FEATURED: ReadonlyArray<{ id: string; label: string; hint: string }> = [
  * hatch to the Accounts settings tab.
  *
  * Click flow:
- *   - "Sign in with X"  → `rpc.app.auth.startOAuthLogin({...})`,
+ *   - "Sign in with X"  → `rpc.pi.auth.startOAuthLogin({...})`,
  *     which kicks off pi's `auth.login()`. The global
  *     `<OAuthFlowModal />` (mounted in `<App />`) renders the
- *     multi-step flow off `root.app.oauthFlow`.
+ *     multi-step flow off `root.pi.oauthFlow`.
  *   - "More options"    → opens the Accounts settings tab in a new
  *     tab via `openViewInRoot(..., { tab: "accounts" })`. We
  *     intentionally don't use the global "open settings" event
@@ -48,17 +48,17 @@ const FEATURED: ReadonlyArray<{ id: string; label: string; hint: string }> = [
  * The card disappears the moment any provider becomes configured,
  * because `refreshAvailableModels()` re-runs after every auth
  * mutation and the parent (`<ChatPane>`) only mounts us when
- * `Object.keys(root.app.models).length === 0`.
+ * `Object.keys(root.pi.models).length === 0`.
  */
 export function ChatAuthCard() {
   const rpc = useRpc()
   const windowId = useWindowId()
   const dbClient = useDbClient()
-  const statuses = useDb(root => root.app.providerStatuses)
+  const statuses = useDb(root => root.pi.providerStatuses)
 
   const onSignIn = async (providerId: string) => {
     try {
-      await rpc.app.auth.startOAuthLogin({ providerId })
+      await rpc.pi.auth.startOAuthLogin({ providerId })
     } catch (err) {
       console.error("[chat-auth-card] startOAuthLogin failed:", err)
     }

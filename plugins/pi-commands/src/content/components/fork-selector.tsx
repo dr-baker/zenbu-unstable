@@ -78,7 +78,7 @@ export function ForkSelector({
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    rpc.app.sessions
+    rpc.pi.sessions
       .getEntryTree({ sessionId })
       .then(res => {
         if (cancelled) return

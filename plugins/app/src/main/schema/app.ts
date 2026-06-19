@@ -172,18 +172,6 @@ export const slashCommand = z.object({
 // User-visible settings + the model catalog the picker reads from.
 // ---------------------------------------------------------------------------
 
-export const modelInfo = z.object({
-  provider: z.string(),
-  id: z.string(),
-  name: z.string(),
-  api: z.string(),
-  reasoning: z.boolean(),
-  thinkingLevelMap: z.record(z.string(), z.string().nullable()).nullable(),
-  input: z.array(z.string()),
-  contextWindow: z.number(),
-  maxTokens: z.number(),
-});
-
 const theme = z.enum(["light", "dark", "oled", "system"]);
 
 const chatBackground = z.object({

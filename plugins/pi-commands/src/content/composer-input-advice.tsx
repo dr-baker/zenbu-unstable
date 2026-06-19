@@ -87,7 +87,7 @@ function PiTreeForkPanel({
   onClose: () => void
 }) {
   const rpc = useRpc()
-  const session = useDb(root => root.app.sessions[panel.sessionId])
+  const session = useDb(root => root.pi.sessions[panel.sessionId])
   const refreshKey = session?.lastActivityAt ?? 0
   const activeLeafId = session?.currentLeafEntryId ?? null
 
@@ -99,7 +99,7 @@ function PiTreeForkPanel({
         activeLeafId={activeLeafId}
         onConfirm={async ({ entryId, choice }) => {
           try {
-            await rpc.app.sessions.navigateTree({
+            await rpc.pi.sessions.navigateTree({
               sessionId: panel.sessionId,
               entryId,
               summarize: choice.kind !== "none",
@@ -122,7 +122,7 @@ function PiTreeForkPanel({
       activeLeafId={activeLeafId}
       onConfirm={async ({ entryId }) => {
         try {
-          await rpc.app.sessions.forkAtUserMessage({
+          await rpc.pi.sessions.forkAtUserMessage({
             sessionId: panel.sessionId,
             entryId,
             windowId: panel.windowId,

@@ -28,7 +28,7 @@ export default function ScopeInfoItem({
   const homeDir = useHomeDir();
 
   const scopeId = useDb((root) =>
-    sessionId ? root.app.sessions[sessionId]?.scopeId ?? null : null,
+    sessionId ? root.pi.sessions[sessionId]?.scopeId ?? null : null,
   );
   const scope = useDb((root) =>
     scopeId ? root.app.scopes[scopeId] ?? null : null,

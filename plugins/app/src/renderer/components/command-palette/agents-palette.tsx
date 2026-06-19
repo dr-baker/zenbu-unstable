@@ -21,11 +21,12 @@ import { useWindowId } from "@/lib/window-state/window-id"
 import { useActiveScopeId } from "@/lib/window-state/active-view"
 import { selectChatInRoot } from "@/lib/window-state/selection"
 import type { Schema } from "../../../main/schema"
+import type { SelfDbSection as PiSchema } from "../../../../.zenbu/types/deps/pi/db-sections"
 import { PaletteShell } from "./palette-shell"
 import { useArrowNav } from "./use-arrow-nav"
 
 type Chat = Schema["chats"][string]
-type Session = Schema["sessions"][string]
+type Session = PiSchema["sessions"][string]
 
 /**
  * Cmd+P focused palette: lists *sessions* (chats deduplicated by
@@ -54,7 +55,7 @@ export function AgentsPalette() {
 
   const activeScopeId = useActiveScopeId()
   const chats = useDb(root => Object.values(root.app.chats))
-  const sessionsById = useDb(root => root.app.sessions)
+  const sessionsById = useDb(root => root.pi.sessions)
 
   // Dedupe scope chats by sessionId — see AgentSidebarPane for the
   // same logic. The palette shows one row per session.

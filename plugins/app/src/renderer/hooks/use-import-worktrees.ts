@@ -100,7 +100,7 @@ export function useImportWorktrees() {
       // handful of worktrees, not thousands.
       for (const { scopeId, chatId } of created) {
         try {
-          await rpc.app.sessions.createChatSession({ scopeId, chatId })
+          await rpc.pi.sessions.createChatSession({ scopeId, chatId })
         } catch (err) {
           console.error(
             "[import-worktrees] createChatSession failed:",

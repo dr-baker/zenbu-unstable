@@ -73,7 +73,7 @@ function RecentWorkspacesPalette() {
   const workspacesById = useDb((root) => root.app.workspaces)
   const scopesById = useDb((root) => root.app.scopes)
   const chatsById = useDb((root) => root.app.chats)
-  const sessionsById = useDb((root) => root.app.sessions)
+  const sessionsById = useDb((root) => root.pi.sessions)
   const lastVisitedAt = useDb(
     (root) => root.searchRecentWorkspaces.lastVisitedAt,
   )

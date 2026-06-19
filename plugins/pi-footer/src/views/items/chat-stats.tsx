@@ -88,7 +88,7 @@ export default function ChatStatsItem({
   const sessionId = args?.sessionId ?? null;
   const stats = useDb((root) => {
     if (!sessionId) return null;
-    return root.app.sessions[sessionId]?.stats ?? null;
+    return root.pi.sessions[sessionId]?.stats ?? null;
   });
 
   if (!stats) return null;
@@ -161,7 +161,7 @@ function AutoCompactionStatusItem({
   return (
     <StatusBarItem
       onClick={() => {
-        void rpc.app.sessions.setAutoCompactionEnabled({
+        void rpc.pi.sessions.setAutoCompactionEnabled({
           sessionId,
           enabled: !enabled,
         });

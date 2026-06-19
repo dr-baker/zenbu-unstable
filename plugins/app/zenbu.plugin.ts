@@ -34,9 +34,6 @@ const FOLDER =
 // lucide: git-compare
 const GIT_COMPARE =
   '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/>';
-// lucide: logs
-const LOGS =
-  '<path d="M3 5h1"/><path d="M3 12h1"/><path d="M3 19h1"/><path d="M8 5h1"/><path d="M8 12h1"/><path d="M8 19h1"/><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/>';
 // lucide: terminal — reused for `tool-output` (which shows bash output).
 const TERMINAL = '<path d="M12 19h8"/><path d="m4 17 6-6-6-6"/>';
 // lucide: git-pull-request
@@ -61,6 +58,12 @@ export default definePlugin({
     { name: "agentSidebar", from: "../agent-sidebar/zenbu.plugin.ts" },
     // Type-only: the tutorial view calls `rpc.openProjects.*`.
     { name: "openProjects", from: "../open-projects/zenbu.plugin.ts" },
+    // Type-only: chat/composer surfaces read `root.pi.sessions` and
+    // call `rpc.pi.sessions` / `rpc.pi.auth` — sessions and auth moved
+    // to the pi plugin (Phase 2 of the app decomposition). The mutual
+    // app↔pi dependsOn is fine: it's a `zen link` directive, not a
+    // runtime load order.
+    { name: "pi", from: "../pi/zenbu.plugin.ts" },
   ],
   // Icons for injections owned by THIS plugin. Other plugins ship
   // their own icons; there's no cross-plugin lookup.
@@ -68,7 +71,6 @@ export default definePlugin({
     "file-tree": lucide(FOLDER),
     file: lucide(FILE),
     "git-diff": lucide(GIT_COMPARE),
-    "pi-event-log": lucide(LOGS),
     // The tool-output side view rendered when a user clicks a chat
     // tool-call preview (currently only BashCard). Terminal icon
     // matches the "this is command output" semantics.

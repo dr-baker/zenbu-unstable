@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import {
   extractToolCallOutput,
   type ToolCallOutputState,
-} from "@/components/chat/lib/extract-tool-call-output"
+} from "../../../../../chat/src/renderer/components/chat/lib/extract-tool-call-output"
 
 type ToolOutputArgs = {
   sessionId?: string
@@ -57,7 +57,7 @@ function ToolOutputPane({
   toolCallId: string
 }) {
   const eventLogRef = useDb(root =>
-    sessionId ? root.app.sessions[sessionId]?.eventLog : undefined,
+    sessionId ? root.pi.sessions[sessionId]?.eventLog : undefined,
   )
   const { items: events } = useCollection(eventLogRef)
   const state = useMemo<ToolCallOutputState>(

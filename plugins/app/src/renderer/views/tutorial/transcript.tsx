@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
-import { streamdownProps } from "../../components/chat/lib/streamdown-config"
-import { useAutoScroll } from "../../components/chat/lib/use-auto-scroll"
-import { Loading } from "../../components/chat/messages/loading"
+import { streamdownProps } from "../../../../../chat/src/renderer/components/chat/lib/streamdown-config"
+import { useAutoScroll } from "../../../../../chat/src/renderer/components/chat/lib/use-auto-scroll"
+import { Loading } from "../../../../../chat/src/renderer/components/chat/messages/loading"
 import zenbuLogoUrl from "./zenbu-logo.svg"
 import {
   PI_PHRASE,

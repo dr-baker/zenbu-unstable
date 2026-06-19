@@ -1,14 +1,15 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
-  SlashCommandInfo,
 } from "@earendil-works/pi-coding-agent"
-
-const CHANNEL = "zenbu-pi:runtime-commands"
+import {
+  RUNTIME_COMMANDS_CHANNEL,
+  type RuntimeCommandsPayload,
+} from "../protocol"
 
 export default function runtimeCommandSync(pi: ExtensionAPI) {
   const sync = (_event: unknown, ctx: ExtensionContext) => {
-    pi.events.emit(CHANNEL, {
+    pi.events.emit(RUNTIME_COMMANDS_CHANNEL, {
       sessionId: ctx.sessionManager.getSessionId(),
       commands: pi.getCommands(),
     } satisfies RuntimeCommandsPayload)
@@ -16,9 +17,4 @@ export default function runtimeCommandSync(pi: ExtensionAPI) {
 
   pi.on("session_start", sync)
   pi.on("resources_discover", sync)
-}
-
-type RuntimeCommandsPayload = {
-  sessionId: string
-  commands: SlashCommandInfo[]
 }

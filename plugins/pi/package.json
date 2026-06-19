@@ -5,8 +5,12 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@earendil-works/pi-ai": "^0.78.0",
     "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@zenbu/ui": "workspace:*",
     "@zenbujs/core": "^0.4.0",
+    "dotenv": "^17.4.2",
+    "nanoid": "^5.1.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zod": "^4.0.0"

@@ -6,16 +6,39 @@ import { DbService } from "@zenbujs/core/services"
 import {
   createEventBus,
   type EventBus,
-  type SlashCommandInfo,
 } from "@earendil-works/pi-coding-agent"
-
-const RUNTIME_COMMANDS_CHANNEL = "zenbu-pi:runtime-commands"
+import {
+  parseRuntimeCommandsPayload,
+  RUNTIME_COMMANDS_CHANNEL,
+  type RuntimeCommandsPayload,
+} from "../../protocol"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const RUNTIME_COMMAND_SYNC_EXTENSION_PATH = path.resolve(
-  here,
-  "../../extension/runtime-command-sync.ts",
-)
+const EXTENSION_DIR = path.resolve(here, "../../extension")
+
+/**
+ * Built-in extensions owned by this plugin, loaded into every embedded
+ * session as ordinary path-based Pi extensions (Pi's own loader reads
+ * the files; extensions get `ctx.cwd` from Pi, and talk back to zenbu
+ * over the shared event bus — see `src/protocol.ts`).
+ */
+const BUILT_IN_EXTENSIONS = [
+  {
+    id: "pi:runtime-command-sync",
+    file: "runtime-command-sync.ts",
+    label: "Runtime command sync",
+  },
+  {
+    id: "pi:bash-timeout",
+    file: "bash-timeout.ts",
+    label: "Bash timeout policy",
+  },
+  {
+    id: "pi:zenbu-house-rules",
+    file: "zenbu-house-rules.ts",
+    label: "Zenbu house rules",
+  },
+] as const
 
 type PiExtensionSource = "plugin" | "built-in" | "user" | "project"
 
@@ -47,10 +70,7 @@ export type PiRuntimeApi = {
   ): () => void
 }
 
-export type RuntimeCommandsPayload = {
-  sessionId: string
-  commands: SlashCommandInfo[]
-}
+export type { RuntimeCommandsPayload } from "../../protocol"
 
 // Pi extension contributions are intentionally path-based. Extensions
 // that need to communicate back to Zenbu should emit on the shared Pi
@@ -76,13 +96,15 @@ export class PiRuntimeService extends Service.create({
       }
     })
 
-    await this.registerExtension({
-      id: "pi:runtime-command-sync",
-      path: RUNTIME_COMMAND_SYNC_EXTENSION_PATH,
-      label: "Runtime command sync",
-      pluginName: "pi",
-      source: "built-in",
-    })
+    for (const extension of BUILT_IN_EXTENSIONS) {
+      await this.registerExtension({
+        id: extension.id,
+        path: path.join(EXTENSION_DIR, extension.file),
+        label: extension.label,
+        pluginName: "pi",
+        source: "built-in",
+      })
+    }
 
     this.setup("runtime-command-sync-listener", () => {
       return this.eventBus.on(RUNTIME_COMMANDS_CHANNEL, data => {
@@ -141,16 +163,17 @@ export class PiRuntimeService extends Service.create({
   }
 
   private async writeRuntimeCommands(data: unknown): Promise<void> {
-    if (!isRuntimeCommandsPayload(data)) return
+    const payload = parseRuntimeCommandsPayload(data)
+    if (!payload) return
     await this.ctx.db.client.update(root => {
       for (const [id, command] of Object.entries(root.pi.runtimeCommands)) {
-        if (command.sessionId === data.sessionId) delete root.pi.runtimeCommands[id]
+        if (command.sessionId === payload.sessionId) delete root.pi.runtimeCommands[id]
       }
-      for (const [index, command] of data.commands.entries()) {
-        const id = `${data.sessionId}:${command.source}:${command.name}:${index}`
+      for (const [index, command] of payload.commands.entries()) {
+        const id = `${payload.sessionId}:${command.source}:${command.name}:${index}`
         root.pi.runtimeCommands[id] = {
           id,
-          sessionId: data.sessionId,
+          sessionId: payload.sessionId,
           name: command.name,
           description: command.description,
           source: command.source,
@@ -158,24 +181,6 @@ export class PiRuntimeService extends Service.create({
         }
       }
     })
-    for (const listener of this.runtimeCommandListeners) listener(data)
+    for (const listener of this.runtimeCommandListeners) listener(payload)
   }
-}
-
-function isRuntimeCommandsPayload(data: unknown): data is RuntimeCommandsPayload {
-  if (!data || typeof data !== "object") return false
-  const payload = data as Partial<RuntimeCommandsPayload>
-  return (
-    typeof payload.sessionId === "string" &&
-    Array.isArray(payload.commands) &&
-    payload.commands.every(command => {
-      if (!command || typeof command !== "object") return false
-      const c = command as Partial<SlashCommandInfo>
-      return (
-        typeof c.name === "string" &&
-        (c.description === undefined || typeof c.description === "string") &&
-        (c.source === "extension" || c.source === "prompt" || c.source === "skill")
-      )
-    })
-  )
 }

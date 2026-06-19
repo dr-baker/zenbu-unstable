@@ -1,4 +1,5 @@
-import { Service } from "@zenbujs/core/runtime"
+import path from "node:path"
+import { Service, getPlugin } from "@zenbujs/core/runtime"
 import { DbService, RpcService } from "@zenbujs/core/services"
 import {
   getAgentDir,
@@ -153,15 +154,19 @@ export class PiCommandsService extends Service.create({
       }
     })
 
-    this.setup("advise-composer-input", () =>
-      this.advise({
-        moduleId: "components/composer/composer.tsx",
+    this.setup("advise-composer-input", () => {
+      const chatDir = getPlugin("chat")?.dir
+      const composerModuleId = chatDir
+        ? path.join(chatDir, "src/renderer/components/composer/composer.tsx")
+        : "components/composer/composer.tsx"
+      return this.advise({
+        moduleId: composerModuleId,
         name: "Composer",
         type: "around",
         modulePath: "src/content/composer-input-advice.tsx",
         exportName: "ComposerInputAdvice",
-      }),
-    )
+      })
+    })
   }
 
   async run(args: Invocation): Promise<CommandResult> {

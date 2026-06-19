@@ -10,12 +10,12 @@ import {
 } from "@zenbu/ui/dialog"
 import { Button } from "@zenbu/ui/button"
 import { Input } from "@zenbu/ui/input"
-import type { Schema } from "../../../main/schema"
+import type { SelfDbSection as PiSchema } from "../../../../.zenbu/types/deps/pi/db-sections"
 
-type Flow = NonNullable<Schema["oauthFlow"]>
+type Flow = NonNullable<PiSchema["oauthFlow"]>
 
 /**
- * Global OAuth login modal. Listens to `root.app.oauthFlow`, which
+ * Global OAuth login modal. Listens to `root.pi.oauthFlow`, which
  * is owned by `AuthService` (main process) and updated as pi calls
  * back through `auth.login()`'s callbacks.
  *
@@ -35,7 +35,7 @@ type Flow = NonNullable<Schema["oauthFlow"]>
  *   - `error`      — terminal; show message + Try again
  */
 export function OAuthFlowModal() {
-  const flow = useDb(root => root.app.oauthFlow)
+  const flow = useDb(root => root.pi.oauthFlow)
   if (!flow) return null
   return <ModalInner flow={flow} />
 }
@@ -44,10 +44,10 @@ function ModalInner({ flow }: { flow: Flow }) {
   const rpc = useRpc()
 
   const onCancel = () => {
-    void rpc.app.auth.cancelOAuthLogin({ flowId: flow.flowId })
+    void rpc.pi.auth.cancelOAuthLogin({ flowId: flow.flowId })
   }
   const onDismiss = () => {
-    void rpc.app.auth.dismissOAuthError({ flowId: flow.flowId })
+    void rpc.pi.auth.dismissOAuthError({ flowId: flow.flowId })
   }
 
   return (
@@ -154,10 +154,10 @@ function OpenUrlBody({ flow }: { flow: Flow }) {
   const url = flow.url ?? ""
 
   const onReopen = () => {
-    void rpc.app.auth.reopenOAuthUrl({ flowId: flow.flowId })
+    void rpc.pi.auth.reopenOAuthUrl({ flowId: flow.flowId })
   }
   const onPasteCode = () => {
-    void rpc.app.auth.requestManualCodeInput({ flowId: flow.flowId })
+    void rpc.pi.auth.requestManualCodeInput({ flowId: flow.flowId })
   }
 
   return (
@@ -197,7 +197,7 @@ function SelectBody({ flow }: { flow: Flow }) {
   const onPick = async (optionId: string) => {
     setBusy(optionId)
     try {
-      await rpc.app.auth.selectOAuthOption({
+      await rpc.pi.auth.selectOAuthOption({
         flowId: flow.flowId,
         optionId,
       })
@@ -243,7 +243,7 @@ function PromptBody({ flow }: { flow: Flow }) {
     if (!canSubmit) return
     setBusy(true)
     try {
-      await rpc.app.auth.submitOAuthPrompt({
+      await rpc.pi.auth.submitOAuthPrompt({
         flowId: flow.flowId,
         value,
       })
@@ -296,7 +296,7 @@ function ManualCodeBody({ flow }: { flow: Flow }) {
     if (!value.trim()) return
     setBusy(true)
     try {
-      await rpc.app.auth.submitOAuthCode({
+      await rpc.pi.auth.submitOAuthCode({
         flowId: flow.flowId,
         code: value.trim(),
       })

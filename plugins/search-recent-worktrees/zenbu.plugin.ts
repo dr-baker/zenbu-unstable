@@ -18,5 +18,6 @@ export default definePlugin({
   name: "searchRecentWorktrees",
   services: ["./src/main/services/*.ts"],
   events: "./src/main/events.ts",
-  dependsOn: [{ name: "app", from: "../../zenbu.config.ts" }],
+  dependsOn: [
+    { name: "pi", from: "../pi/zenbu.plugin.ts" },{ name: "app", from: "../../zenbu.config.ts" }],
 })

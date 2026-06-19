@@ -75,7 +75,7 @@ export function useFocusPaneShortcut() {
         // the read with synchronous pane-state lookups.
         const finalResult = result as SplitPaneResult | null
         if (finalResult?.kind === "chat" && finalResult.needsSession) {
-          void rpc.app.sessions
+          void rpc.pi.sessions
             .createChatSession({
               scopeId: finalResult.scopeId,
               chatId: finalResult.chatId,

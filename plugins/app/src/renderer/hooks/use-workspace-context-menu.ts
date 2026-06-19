@@ -164,7 +164,7 @@ export function useWorkspaceContextMenu() {
           .filter((id): id is string => id != null)
 
         for (const sessionId of wsSessionIds) {
-          await rpc.app.sessions
+          await rpc.pi.sessions
             .deleteSession({ sessionId })
             .catch(err =>
               console.error("[sidebar] deleteSession failed:", err),
@@ -334,7 +334,7 @@ export function useWorkspaceContextMenu() {
       const sessionId = chat.session.sessionId
       if (chosenId === "branch_last_user") {
         try {
-          const result = await rpc.app.sessions.branchFromLastUserTurn({
+          const result = await rpc.pi.sessions.branchFromLastUserTurn({
             sessionId,
           })
           if (!result.branched) {
@@ -344,14 +344,14 @@ export function useWorkspaceContextMenu() {
           console.error("[sidebar] branch failed:", err)
         }
       } else if (chosenId === "fork") {
-        const session = dbClient.readRoot().app.sessions[sessionId]
+        const session = dbClient.readRoot().pi.sessions[sessionId]
         const entryId = session?.currentLeafEntryId
         if (!entryId) {
           console.warn("[sidebar] no leaf entry to fork from")
           return
         }
         try {
-          const result = await rpc.app.sessions.fork({
+          const result = await rpc.pi.sessions.fork({
             sessionId,
             entryId,
             workspaceId: activeWorkspaceId ?? "",

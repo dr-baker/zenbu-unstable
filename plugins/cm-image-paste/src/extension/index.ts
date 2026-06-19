@@ -1,6 +1,6 @@
 import type { Extension } from "@codemirror/state"
 import { EditorView } from "@codemirror/view"
-import { putImage } from "@zenbu/app/image-cache"
+import { putImage } from "@zenbu/chat/image-cache"
 import { getDbClient } from "../lib/db-client-ref"
 
 /**

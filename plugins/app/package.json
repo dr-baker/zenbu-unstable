@@ -3,9 +3,6 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "exports": {
-    "./image-cache": "./src/renderer/components/composer/lib/image-cache.ts"
-  },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
     "@codemirror/commands": "^6.10.3",

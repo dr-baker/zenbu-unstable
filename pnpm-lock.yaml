@@ -328,6 +328,58 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
+  plugins/chat:
+    dependencies:
+      '@codemirror/commands':
+        specifier: ^6.10.3
+        version: 6.10.3
+      '@codemirror/state':
+        specifier: ^6.6.0
+        version: 6.6.0
+      '@codemirror/view':
+        specifier: ^6.43.0
+        version: 6.43.0
+      '@earendil-works/pi-ai':
+        specifier: ^0.78.0
+        version: 0.78.0(ws@8.21.0)(zod@4.4.3)
+      '@zenbu/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@zenbujs/core':
+        specifier: ^0.4.0
+        version: 0.4.4(@types/node@22.19.19)(electron@42.3.0)(jiti@2.7.0)(lightningcss@1.32.0)(react@19.2.6)(sass@1.51.0)(yaml@2.9.0)(zod@4.4.3)
+      lucide-react:
+        specifier: ^1.16.0
+        version: 1.16.0(react@19.2.6)
+      nanoid:
+        specifier: ^5.1.11
+        version: 5.1.11
+      react:
+        specifier: ^19.0.0
+        version: 19.2.6
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.6(react@19.2.6)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      streamdown:
+        specifier: ^2.5.0
+        version: 2.5.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.0
+        version: 22.19.19
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.15
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.15)
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
   plugins/cm-image-paste:
     dependencies:
       '@codemirror/state':
@@ -336,9 +388,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.0.0
         version: 6.43.0
-      '@zenbu/app':
+      '@zenbu/chat':
         specifier: workspace:*
-        version: link:../app
+        version: link:../chat
       '@zenbujs/core':
         specifier: ^0.4.0
         version: 0.4.4(@types/node@22.19.19)(electron@42.3.0)(jiti@2.7.0)(lightningcss@1.32.0)(react@19.2.6)(sass@1.51.0)(yaml@2.9.0)(zod@4.4.3)
@@ -622,12 +674,24 @@ importers:
 
   plugins/pi:
     dependencies:
+      '@earendil-works/pi-ai':
+        specifier: ^0.78.0
+        version: 0.78.0(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
         specifier: ^0.78.0
         version: 0.78.0(ws@8.21.0)(zod@4.4.3)
+      '@zenbu/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@zenbujs/core':
         specifier: ^0.4.0
         version: 0.4.4(@types/node@24.12.4)(electron@42.3.0)(jiti@2.7.0)(lightningcss@1.32.0)(react@19.2.6)(sass@1.51.0)(yaml@2.9.0)(zod@4.4.3)
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      nanoid:
+        specifier: ^5.1.11
+        version: 5.1.11
       react:
         specifier: ^19.0.0
         version: 19.2.6
