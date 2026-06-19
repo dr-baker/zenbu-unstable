@@ -7,6 +7,7 @@ import {
   ContextMenuTrigger,
 } from "@zenbu/ui/context-menu"
 import { cn } from "@/lib/utils"
+import { perfTrace } from "@/lib/perf-trace"
 import { HoverTip } from "@zenbu/ui/hover-tip"
 import { Spinner } from "../common/spinner"
 
@@ -37,6 +38,8 @@ export type ChatTabEntry = {
    * etc.) rather than a chat. The tabstrip uses this to skip
    * chat-specific affordances. */
   isView?: boolean
+  /** Debug-only data warming state. Omitted in normal UI. */
+  warmState?: "queued" | "warming" | "warm"
 }
 
 export type ChatTabsProps = {
@@ -282,8 +285,32 @@ function ChatTabItem({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
+          onPointerEnter={() => {
+            perfTrace.mark("chat.tab.hover", {
+              tabId: entry.id,
+              hasChat: entry.hasChat,
+              isActive,
+              warmState: entry.warmState,
+            })
+          }}
+          onPointerDown={e => {
+            if (e.button !== 0) return
+            perfTrace.mark("chat.tab.pointer_down", {
+              tabId: entry.id,
+              hasChat: entry.hasChat,
+              isActive,
+              warmState: entry.warmState,
+            })
+          }}
           onClick={e => {
-            if (e.button === 0) onSelect(entry.id)
+            if (e.button !== 0) return
+            perfTrace.mark("chat.tab.click", {
+              tabId: entry.id,
+              hasChat: entry.hasChat,
+              isActive,
+              warmState: entry.warmState,
+            })
+            onSelect(entry.id)
           }}
           onAuxClick={e => {
             if (e.button === 1) {
@@ -321,6 +348,9 @@ function ChatTabItem({
             >
               <Spinner />
             </span>
+          )}
+          {entry.warmState && (
+            <WarmStateDot state={entry.warmState} />
           )}
           {entry.hasUnread && !entry.isStreaming && (
             // Unread dot: a turn finished on this session while the
@@ -398,6 +428,27 @@ function ChatTabItem({
         )}
       </ContextMenuContent>
     </ContextMenu>
+  )
+}
+
+function WarmStateDot({ state }: { state: "queued" | "warming" | "warm" }) {
+  const label =
+    state === "warming"
+      ? "Warming hidden chat data"
+      : state === "queued"
+        ? "Queued for chat data warm"
+        : "Chat data warmed"
+  return (
+    <span
+      aria-label={label}
+      title={label}
+      className={cn(
+        "block h-1.5 w-1.5 shrink-0 rounded-full",
+        state === "warming" && "animate-pulse bg-sky-400/80",
+        state === "queued" && "bg-muted-foreground/30",
+        state === "warm" && "bg-emerald-400/60",
+      )}
+    />
   )
 }
 

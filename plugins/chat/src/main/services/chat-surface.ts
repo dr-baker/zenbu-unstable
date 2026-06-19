@@ -7,6 +7,9 @@ import { Service } from "@zenbujs/core/runtime"
  *    every chat tab (see the shell's `ChatPaneSlot`). Registered as a
  *    plain component injection so the shell stays decoupled from this
  *    plugin's module graph.
+ *  - `"chat-data-warmer"` — optional data-only background warmer used by
+ *    the app shell for likely tab-switch targets. It hydrates event logs and
+ *    fills the renderer materialization cache without mounting hidden chat UI.
  *  - `"chat-window"` — the standalone chat window view. The app's
  *    `ChatWindowService` keeps window management (`open`/`closeTab` +
  *    `root.app.chatWindows`); it opens windows by this injection name.
@@ -26,6 +29,14 @@ export class ChatSurfaceService extends Service.create({
         modulePath: "src/renderer/components/chat/chat-pane.tsx",
         exportName: "ChatPane",
         meta: { kind: "component", label: "Chat pane" },
+      }),
+    )
+    this.setup("register-chat-data-warmer", () =>
+      this.inject({
+        name: "chat-data-warmer",
+        modulePath: "src/renderer/components/chat/chat-data-warmer.tsx",
+        exportName: "ChatDataWarmer",
+        meta: { kind: "component", label: "Chat data warmer" },
       }),
     )
     this.setup("register-chat-window-view", () =>
