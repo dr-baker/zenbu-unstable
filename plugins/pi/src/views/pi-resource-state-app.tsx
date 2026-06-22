@@ -7,6 +7,14 @@ type PiResourceStateArgs = {
   directory?: string | null
 }
 
+type SourceInfo = {
+  path?: string
+  source?: string
+  scope?: string
+  origin?: string
+  baseDir?: string
+} | null
+
 type ResourceEntry = {
   resourceId: string
   resourceType: string
@@ -14,7 +22,7 @@ type ResourceEntry = {
   enabled?: boolean
   loaded?: boolean
   tier?: string
-  sourceInfo?: { path?: string; source?: string; scope?: string; origin?: string } | null
+  sourceInfo?: SourceInfo
 }
 
 type RuntimeCommand = {
@@ -22,6 +30,7 @@ type RuntimeCommand = {
   description?: string
   source: string
   resourceId?: string | null
+  sourceInfo?: SourceInfo
 }
 
 type RuntimeTool = {
@@ -29,6 +38,7 @@ type RuntimeTool = {
   description?: string
   active: boolean
   resourceId?: string | null
+  sourceInfo?: SourceInfo
 }
 
 type ActiveContext = {
@@ -38,19 +48,35 @@ type ActiveContext = {
 }
 
 type DetailMode =
-  | { group: "loaded"; type: ResourceTypeKey }
-  | { group: "workspace"; type: ResourceTypeKey }
+  | { group: "source"; scope: SourceScopeKey }
   | { group: "issues"; type: IssueType }
   | { group: "capabilities"; type: "commands" | "tools" }
 
 type ResourceTypeKey = "extension" | "skill" | "prompt" | "theme"
 type IssueType = "missing" | "suppressed" | "errors"
+type SourceScopeKey = "project" | "user" | "temporary" | "unknown"
 
-const RESOURCE_TYPES: Array<{ key: ResourceTypeKey; label: string }> = [
-  { key: "extension", label: "Extensions" },
-  { key: "skill", label: "Skills" },
-  { key: "prompt", label: "Prompts" },
-  { key: "theme", label: "Themes" },
+type SourceGroup = {
+  key: SourceScopeKey
+  label: string
+  description: string
+  loadedEntries: ResourceEntry[]
+  availableEntries: ResourceEntry[]
+  typeCounts: Map<string, number>
+}
+
+const RESOURCE_TYPES: Array<{ key: ResourceTypeKey; label: string; short: string }> = [
+  { key: "extension", label: "Extensions", short: "Ext" },
+  { key: "skill", label: "Skills", short: "Skills" },
+  { key: "prompt", label: "Prompts", short: "Prompts" },
+  { key: "theme", label: "Themes", short: "Themes" },
+]
+
+const SOURCE_SCOPES: Array<{ key: SourceScopeKey; label: string; description: string }> = [
+  { key: "project", label: "Project", description: "Resources from this workspace/repo" },
+  { key: "user", label: "Global (~/.pi)", description: "User-wide Pi resources" },
+  { key: "temporary", label: "Session / Zenbu", description: "Injected by Zenbu, plugins, or this live session" },
+  { key: "unknown", label: "Other", description: "Resources without source scope metadata" },
 ]
 
 export function PiResourceStateApp({ args }: ViewComponentProps<PiResourceStateArgs>) {
@@ -71,37 +97,25 @@ export function PiResourceStateApp({ args }: ViewComponentProps<PiResourceStateA
     currentActivationHash: data.staticCatalog?.metadata.activationHash,
   })
 
-  const [mode, setMode] = useState<DetailMode>({ group: "loaded", type: "extension" })
-  const workspaceStaticEntries = useMemo(
-    () => (data.staticCatalog?.entries ?? []).filter(isWorkspaceSpecificResource),
-    [data.staticCatalog?.entries],
+  const [mode, setMode] = useState<DetailMode>({ group: "source", scope: "project" })
+  const sourceGroups = useMemo(
+    () => buildSourceGroups({
+      availableEntries: data.staticCatalog?.entries ?? [],
+      loadedEntries: data.snapshot?.resources ?? [],
+    }),
+    [data.staticCatalog?.entries, data.snapshot?.resources],
   )
-  const workspaceRuntimeEntries = useMemo(
-    () => (data.snapshot?.resources ?? []).filter(isWorkspaceSpecificResource),
-    [data.snapshot?.resources],
-  )
-  const workspaceErrors = useMemo(
-    () =>
-      (data.snapshot?.errors ?? []).filter((error: { path?: string }) =>
-        isWorkspaceSpecificError(error, active.directory),
-      ),
-    [data.snapshot?.errors, active.directory],
-  )
-  const staticCounts = useMemo(
-    () => countStaticEntries(workspaceStaticEntries),
-    [workspaceStaticEntries],
-  )
-  const runtimeCounts = useMemo(
-    () => countRuntimeEntries(workspaceRuntimeEntries),
-    [workspaceRuntimeEntries],
-  )
+  const selectedSource =
+    mode.group === "source"
+      ? mode.scope
+      : firstPopulatedSource(sourceGroups) ?? "project"
   const issueCounts = useMemo(
     () => ({
-      missing: workspaceStaticEntries.filter(entry => entry.activationState === "missing").length,
-      suppressed: workspaceStaticEntries.filter(entry => entry.activationState === "suppressed").length,
-      errors: workspaceErrors.length,
+      missing: (data.staticCatalog?.entries ?? []).filter(entry => entry.activationState === "missing").length,
+      suppressed: (data.staticCatalog?.entries ?? []).filter(entry => entry.activationState === "suppressed").length,
+      errors: data.snapshot?.errors.length ?? 0,
     }),
-    [workspaceStaticEntries, workspaceErrors.length],
+    [data.staticCatalog?.entries, data.snapshot?.errors.length],
   )
   const detail = useMemo(
     () => buildDetail({
@@ -110,8 +124,10 @@ export function PiResourceStateApp({ args }: ViewComponentProps<PiResourceStateA
       staticCatalog: data.staticCatalog,
       definitions: data.definitions,
       directory: active.directory,
+      sourceGroups,
+      selectedSource,
     }),
-    [mode, data.snapshot, data.staticCatalog, data.definitions, active.directory],
+    [mode, data.snapshot, data.staticCatalog, data.definitions, active.directory, sourceGroups, selectedSource],
   )
 
   if (!active.scopeId) {
@@ -164,17 +180,10 @@ export function PiResourceStateApp({ args }: ViewComponentProps<PiResourceStateA
       </header>
 
       <section className="space-y-4 p-3">
-        <OverviewSection
-          title="Loaded from workspace"
-          counts={runtimeCounts}
-          selected={mode.group === "loaded" ? mode.type : null}
-          onSelect={type => setMode({ group: "loaded", type })}
-        />
-        <OverviewSection
-          title="Available from workspace"
-          counts={staticCounts.byType}
-          selected={mode.group === "workspace" ? mode.type : null}
-          onSelect={type => setMode({ group: "workspace", type })}
+        <SourceSection
+          groups={sourceGroups}
+          selected={selectedSource}
+          onSelect={scope => setMode({ group: "source", scope })}
         />
         {(issueCounts.missing || issueCounts.suppressed || issueCounts.errors) ? (
           <IssueSection counts={issueCounts} selected={mode.group === "issues" ? mode.type : null} onSelect={type => setMode({ group: "issues", type })} />
@@ -255,39 +264,60 @@ function resolveChatIdFromPaneState(paneState: any): string | null {
   return null
 }
 
-function isWorkspaceSpecificResource(entry: ResourceEntry): boolean {
-  return entry.sourceInfo?.scope === "project" || entry.tier === "pi-project"
-}
-
-function isWorkspaceSpecificError(
-  error: { path?: string | null },
-  directory: string | null | undefined,
-): boolean {
-  if (!directory || !error.path) return true
-  return error.path === directory || error.path.startsWith(`${directory}/`)
-}
-
-function countStaticEntries(entries: ResourceEntry[]) {
-  const counts = {
-    active: 0,
-    disabled: 0,
-    suppressed: 0,
-    missing: 0,
-    byType: new Map<string, number>(),
+function buildSourceGroups({
+  availableEntries,
+  loadedEntries,
+}: {
+  availableEntries: ResourceEntry[]
+  loadedEntries: ResourceEntry[]
+}): SourceGroup[] {
+  const byScope = new Map<SourceScopeKey, SourceGroup>()
+  for (const scope of SOURCE_SCOPES) {
+    byScope.set(scope.key, {
+      key: scope.key,
+      label: scope.label,
+      description: scope.description,
+      loadedEntries: [],
+      availableEntries: [],
+      typeCounts: new Map(),
+    })
   }
-  for (const entry of entries) {
-    if (entry.activationState === "active") counts.active++
-    else if (entry.activationState === "disabled") counts.disabled++
-    else if (entry.activationState === "suppressed") counts.suppressed++
-    else if (entry.activationState === "missing") counts.missing++
-    counts.byType.set(entry.resourceType, (counts.byType.get(entry.resourceType) ?? 0) + 1)
+
+  for (const entry of loadedEntries) {
+    byScope.get(sourceScopeKey(entry))?.loadedEntries.push(entry)
   }
-  return counts
+  for (const entry of availableEntries) {
+    byScope.get(sourceScopeKey(entry))?.availableEntries.push(entry)
+  }
+  for (const group of byScope.values()) {
+    group.typeCounts = countUniqueEntriesByType([...group.loadedEntries, ...group.availableEntries])
+  }
+
+  return SOURCE_SCOPES
+    .map(scope => byScope.get(scope.key)!)
+    .filter(group => group.key !== "unknown" || group.loadedEntries.length || group.availableEntries.length)
 }
 
-function countRuntimeEntries(entries: ResourceEntry[]) {
+function sourceScopeKey(entry: ResourceEntry): SourceScopeKey {
+  const scope = entry.sourceInfo?.scope
+  if (scope === "project" || scope === "user" || scope === "temporary") return scope
+  if (entry.tier === "pi-project") return "project"
+  if (entry.tier === "pi-user") return "user"
+  if (["pi-temporary", "zenbu-built-in", "zenbu-plugin"].includes(entry.tier ?? "")) return "temporary"
+  return "unknown"
+}
+
+function firstPopulatedSource(groups: SourceGroup[]): SourceScopeKey | null {
+  return groups.find(group => group.loadedEntries.length || group.availableEntries.length)?.key ?? null
+}
+
+function countUniqueEntriesByType(entries: ResourceEntry[]) {
+  const seen = new Set<string>()
   const counts = new Map<string, number>()
   for (const entry of entries) {
+    const key = resourceIdentityKey(entry)
+    if (seen.has(key)) continue
+    seen.add(key)
     counts.set(entry.resourceType, (counts.get(entry.resourceType) ?? 0) + 1)
   }
   return counts
@@ -314,26 +344,48 @@ function statusTitle(snapshot: any, catalog: any, directory: string | null | und
   return `${runtime}\n${inventory}\nDirectory: ${directory ?? catalog?.directory ?? "No directory"}`
 }
 
-function OverviewSection({
-  title,
-  counts,
+function SourceSection({
+  groups,
   selected,
   onSelect,
 }: {
-  title: string
-  counts: Map<string, number>
-  selected: ResourceTypeKey | null
-  onSelect: (type: ResourceTypeKey) => void
+  groups: SourceGroup[]
+  selected: SourceScopeKey
+  onSelect: (scope: SourceScopeKey) => void
 }) {
   return (
     <div>
-      <div className="mb-2 text-[11px] font-medium text-muted-foreground">{title}</div>
-      <div className="flex flex-wrap gap-1.5">
-        {RESOURCE_TYPES.map(type => (
-          <SelectorPill key={type.key} active={selected === type.key} count={resourceCount(counts, type.key)} onClick={() => onSelect(type.key)}>
-            {type.label}
-          </SelectorPill>
-        ))}
+      <div className="mb-2 text-[11px] font-medium text-muted-foreground">Resources by source</div>
+      <div className="space-y-2">
+        {groups.map(group => {
+          const total = uniqueResourceCount(group)
+          const active = selected === group.key
+          return (
+            <button
+              key={group.key}
+              className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${active ? "border-primary bg-primary/10" : "border-border bg-muted/20 hover:bg-accent/70"}`}
+              onClick={() => onSelect(group.key)}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="truncate text-[12px] font-semibold">{group.label}</div>
+                <div className="shrink-0 text-[11px] text-muted-foreground">{total}</div>
+              </div>
+              <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{group.description}</div>
+              <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+                <span>{group.loadedEntries.length} loaded</span>
+                <span>·</span>
+                <span>{group.availableEntries.length} inventory</span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {RESOURCE_TYPES.map(type => (
+                  <span key={type.key} className="rounded-full bg-background/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {type.short} {resourceCount(group.typeCounts, type.key)}
+                  </span>
+                ))}
+              </div>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -412,63 +464,51 @@ function buildDetail({
   snapshot,
   staticCatalog,
   definitions,
-  directory,
+  sourceGroups,
+  selectedSource,
 }: {
   mode: DetailMode
   snapshot: any
   staticCatalog: any
   definitions: Record<string, { label?: string | null; canonicalPath?: string }>
   directory: string | null
+  sourceGroups: SourceGroup[]
+  selectedSource: SourceScopeKey
 }) {
-  if (mode.group === "loaded") {
-    const rows = (snapshot?.resources ?? [])
-      .filter(isWorkspaceSpecificResource)
-      .filter((entry: ResourceEntry) => isResourceType(entry.resourceType, mode.type))
-      .map((entry: ResourceEntry) => resourceRow(entry, definitions, "loaded"))
+  if (mode.group === "source") {
+    const group = sourceGroups.find(item => item.key === selectedSource) ?? sourceGroups[0]
+    const rows = group ? sourceRows(group, definitions) : []
     return {
-      title: `Loaded workspace ${pluralResourceLabel(mode.type).toLowerCase()}`,
-      subtitle: `${rows.length} project-scoped resources loaded in this chat`,
-      emptyText: "No workspace-specific resources of this type are loaded in the active chat.",
-      rows,
-    }
-  }
-  if (mode.group === "workspace") {
-    const rows = (staticCatalog?.entries ?? [])
-      .filter(isWorkspaceSpecificResource)
-      .filter((entry: ResourceEntry) => isResourceType(entry.resourceType, mode.type))
-      .map((entry: ResourceEntry) => resourceRow(entry, definitions, entry.activationState ?? "available"))
-    return {
-      title: `Available workspace ${pluralResourceLabel(mode.type).toLowerCase()}`,
-      subtitle: `${rows.length} project-scoped resources in workspace inventory`,
-      emptyText: "No workspace-specific resources of this type were found for this workspace.",
+      title: group ? `${group.label} resources` : "Resources",
+      subtitle: group
+        ? `${group.loadedEntries.length} loaded in chat · ${group.availableEntries.length} in inventory`
+        : "No resource sources found",
+      emptyText: group ? `No resources found from ${group.label}.` : "No resources found.",
       rows,
     }
   }
   if (mode.group === "issues") {
     if (mode.type === "errors") {
-      const rows = (snapshot?.errors ?? [])
-        .filter((error: { path?: string }) => isWorkspaceSpecificError(error, directory))
-        .map((error: { path: string; error: string }, index: number) => ({
+      const rows = (snapshot?.errors ?? []).map((error: { path: string; error: string }, index: number) => ({
         key: `${error.path}:${index}`,
         title: error.error,
         subtitle: error.path,
         meta: "error",
       }))
       return {
-        title: "Workspace resource errors",
-        subtitle: `${rows.length} project-scoped runtime errors`,
-        emptyText: "No workspace-specific runtime resource errors.",
+        title: "Resource errors",
+        subtitle: `${rows.length} runtime errors`,
+        emptyText: "No runtime resource errors.",
         rows,
       }
     }
     const rows = (staticCatalog?.entries ?? [])
-      .filter(isWorkspaceSpecificResource)
       .filter((entry: ResourceEntry) => entry.activationState === mode.type)
       .map((entry: ResourceEntry) => resourceRow(entry, definitions, mode.type))
     return {
-      title: `${mode.type === "missing" ? "Missing" : "Suppressed"} workspace resources`,
-      subtitle: `${rows.length} project-scoped resources in workspace inventory`,
-      emptyText: `No ${mode.type} workspace-specific resources.`,
+      title: `${mode.type === "missing" ? "Missing" : "Suppressed"} resources`,
+      subtitle: `${rows.length} resources in inventory`,
+      emptyText: `No ${mode.type} resources.`,
       rows,
     }
   }
@@ -477,7 +517,7 @@ function buildDetail({
       key: `${item.source}:${item.name}`,
       title: `/${item.name}`,
       subtitle: item.description ?? definitionLabel(item.resourceId, definitions),
-      meta: item.source,
+      meta: [item.source, sourceScopeLabel(item.sourceInfo)].filter(Boolean).join(" · "),
     }))
     return {
       title: "Runtime commands",
@@ -490,7 +530,7 @@ function buildDetail({
     key: item.name,
     title: item.name,
     subtitle: item.description ?? definitionLabel(item.resourceId, definitions),
-    meta: item.active ? "active" : "inactive",
+    meta: [item.active ? "active" : "inactive", sourceScopeLabel(item.sourceInfo)].filter(Boolean).join(" · "),
   }))
   return {
     title: "Runtime tools",
@@ -500,17 +540,71 @@ function buildDetail({
   }
 }
 
+function sourceRows(
+  group: SourceGroup,
+  definitions: Record<string, { label?: string | null; canonicalPath?: string }>,
+) {
+  const loadedByKey = new Map(group.loadedEntries.map(entry => [resourceIdentityKey(entry), entry]))
+  const availableByKey = new Map(group.availableEntries.map(entry => [resourceIdentityKey(entry), entry]))
+  const orderedKeys = [
+    ...group.loadedEntries.map(resourceIdentityKey),
+    ...group.availableEntries.map(resourceIdentityKey),
+  ]
+  const seen = new Set<string>()
+  const rows = []
+  for (const key of orderedKeys) {
+    if (seen.has(key)) continue
+    seen.add(key)
+    const loaded = loadedByKey.get(key)
+    const available = availableByKey.get(key)
+    const entry = loaded ?? available
+    if (!entry) continue
+    const state = resourcePresenceLabel({ loaded: Boolean(loaded), available })
+    rows.push(resourceRow(entry, definitions, state))
+  }
+  return rows
+}
+
 function resourceRow(
   entry: ResourceEntry,
   definitions: Record<string, { label?: string | null; canonicalPath?: string }>,
   state: string,
 ) {
   return {
-    key: `${entry.resourceType}:${entry.resourceId}:${entry.sourceInfo?.source ?? ""}:${entry.sourceInfo?.path ?? ""}`,
+    key: resourceIdentityKey(entry),
     title: definitionLabel(entry.resourceId, definitions) ?? entry.resourceId,
     subtitle: entry.sourceInfo?.path ?? entry.sourceInfo?.origin ?? entry.sourceInfo?.scope,
-    meta: [entry.tier, state].filter(Boolean).join(" · ") || entry.resourceType,
+    meta: [resourceTypeLabel(entry.resourceType), state].filter(Boolean).join(" · ") || entry.resourceType,
   }
+}
+
+function resourcePresenceLabel({
+  loaded,
+  available,
+}: {
+  loaded: boolean
+  available: ResourceEntry | undefined
+}): string {
+  const states = []
+  if (loaded) states.push("loaded")
+  if (available) states.push(available.activationState === "active" ? "inventory" : available.activationState ?? "inventory")
+  return states.join(" + ") || "seen"
+}
+
+function resourceIdentityKey(entry: ResourceEntry): string {
+  return [
+    entry.resourceType,
+    entry.resourceId,
+    entry.sourceInfo?.scope ?? "",
+    entry.sourceInfo?.source ?? "",
+    entry.sourceInfo?.origin ?? "",
+    entry.sourceInfo?.path ?? "",
+    entry.tier ?? "",
+  ].join(":")
+}
+
+function uniqueResourceCount(group: SourceGroup): number {
+  return new Set([...group.loadedEntries, ...group.availableEntries].map(resourceIdentityKey)).size
 }
 
 function resourceCount(counts: Map<string, number>, type: ResourceTypeKey): number {
@@ -525,8 +619,15 @@ function isResourceType(actual: string, expected: ResourceTypeKey): boolean {
   return actual === expected || actual === `${expected}s` || actual.endsWith(`.${expected}`) || actual.endsWith(`.${expected}s`)
 }
 
-function pluralResourceLabel(type: ResourceTypeKey): string {
-  return RESOURCE_TYPES.find(item => item.key === type)?.label ?? type
+function resourceTypeLabel(type: string): string {
+  const matched = RESOURCE_TYPES.find(item => isResourceType(type, item.key))
+  if (!matched) return type
+  return matched.label.endsWith("s") ? matched.label.slice(0, -1) : matched.label
+}
+
+function sourceScopeLabel(sourceInfo: SourceInfo | undefined): string | null {
+  const scope = sourceInfo?.scope
+  return SOURCE_SCOPES.find(item => item.key === scope)?.label ?? null
 }
 
 function Row({
